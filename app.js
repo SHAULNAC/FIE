@@ -3,6 +3,7 @@ const SB_KEY = 'sb_publishable_2JftgVsArBG2NB-RXp0q4Q_jdd8VfPO';
 const client = supabase.createClient(SB_URL, SB_KEY);
 
 let currentUser = null;
+let analyticsTimeout = null; // טיימר ייעודי לאנליטיקס
 let userFavorites = [];
 let debounceTimeout = null;
 let isPlaying = false;
@@ -248,7 +249,14 @@ function renderVideoGrid(videos, isAppend = false) {
 function preparePlay(encodedData) {
     try {
         const data = JSON.parse(decodeURIComponent(atob(encodedData)));
-        
+        // --- שליחה לגוגל אנליטיקס ---
+        if (typeof gtag === 'function') {
+            gtag('event', 'video_start', {
+                'video_title': data.t,
+                'video_id': data.id,
+                'video_category': data.cat
+            });
+        }
         const playerWin = document.getElementById('floating-player');
         const playerBar = document.getElementById('main-player-bar'); 
         const container = document.getElementById('youtubePlayer');
@@ -553,6 +561,26 @@ if (contentArea) {
     });
 }// --- אתחול ---
 
-document.getElementById('globalSearch').addEventListener('input', (e) => fetchVideos(e.target.value));
+// מאזין לחיפוש: חיפוש מיידי, דיווח לאנליטיקס מושהה
+document.getElementById('globalSearch').addEventListener('input', (e) => {
+    const query = e.target.value.trim();
+    
+    // 1. ביצוע החיפוש עצמו - קורה מיד ללא המתנה
+    fetchVideos(query);
+
+    // 2. ניהול הדיווח לאנליטיקס - המתנה של 2 שניות מסיום ההקלדה
+    clearTimeout(analyticsTimeout); // מאפס את הטיימר בכל לחיצת מקש
+
+    if (query.length > 0) {
+        analyticsTimeout = setTimeout(() => {
+            if (typeof gtag === 'function') {
+                gtag('event', 'search', {
+                    'search_term': query
+                });
+                console.log("Analytics: Search tracked (2s idle) -> " + query);
+            }
+        }, 2000);
+    }
+});
 
 init();
