@@ -137,7 +137,7 @@ async function fetchVideos(query = "", isAppend = false) {
 
     if (!currentSearchQuery) {
         const { data } = await client.from('videos')
-            .select('id, title, channel_title, thumbnail, duration, views_count, likes_count, category_id')
+            .select('id, title, channel_title, thumbnail, duration, views, likes, category_id')
             .order('published_at', { ascending: false })
             .range(from, to);
         fetchedData = data;
