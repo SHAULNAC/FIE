@@ -249,6 +249,8 @@ function renderVideoGrid(videos, isAppend = false) {
     }
 }
 
+let lastCurrentTime = -1;
+let stuckAtEndCounter = 0;
 
 async function preparePlay(encodedData) {
     try {
@@ -307,43 +309,66 @@ async function preparePlay(encodedData) {
                 style="opacity: 0; width: 100%; height: 100%; transition: opacity 0.5s ease; position: absolute; top: 0; left: 0; z-index: 2;"
                 onload="const loader = document.getElementById('player-loader'); if(loader) loader.style.display='none'; this.style.opacity='1';">
             </iframe>`;
-      window.onmessage = function(e) {
+      // משתנים למעקב (מחוץ לפונקציה)
+
+
+window.onmessage = function(e) {
     if (!e.origin.includes("youtube")) return;
     
     try {
         const msgData = JSON.parse(e.data);
         const info = msgData.info;
 
-        // הגנה מפני הפעלה כפולה
-        if (window.autoPlayTriggered) return;
+        if (window.autoPlayTriggered || !info) return;
 
-        // 1. בדיקת מצבי נגן (Player State)
-        // 0 = Ended (סיום רגיל)
-        // 4 = Video Cued (לפעמים קורה כשהסרטון נתקע בסוף)
-        if (info && (info.playerState === 0 || info.playerState === 4)) {
+        // 1. זיהוי סיום רשמי (אם במקרה עבר)
+        if (info.playerState === 0) {
             triggerNext();
             return;
         }
 
-        // 2. בדיקת זמן (גם בדילוגים)
-        if (info && info.currentTime && info.duration) {
+        // 2. המנגנון למניעת תקיעות בנטפרי (החלק החזק)
+        if (info.currentTime && info.duration) {
             const timeLeft = info.duration - info.currentTime;
-            // אם נשארו פחות מ-2 שניות (טווח רחב יותר לביטחון)
-            if (timeLeft > 0 && timeLeft < 2) {
-                triggerNext();
-                return;
+            
+            // בדיקה א': האם אנחנו ב"אזור הסכנה" (5 שניות אחרונות)?
+            if (timeLeft < 5) {
+                
+                // האם הזמן של הסרטון הפסיק להתקדם?
+                if (info.currentTime === lastCurrentTime) {
+                    stuckAtEndCounter++;
+                    
+                    // אם הסרטון "קפוא" באותו זמן כבר 3 דגימות (בערך 1.5 שניות)
+                    // ובכל זאת אנחנו קרובים לסוף - זה בוודאות סיום של נטפרי
+                    if (stuckAtEndCounter > 3) {
+                        console.log("זוהתה תקיעת נטפרי בסוף סרטון. מדלג לבא...");
+                        triggerNext();
+                    }
+                } else {
+                    stuckAtEndCounter = 0; // הסרטון עדיין מתקדם
+                }
+                lastCurrentTime = info.currentTime;
+            } else {
+                // אנחנו רחוקים מהסוף - מאפסים הכל כדי למנוע דילוגים בטעות
+                stuckAtEndCounter = 0;
+                lastCurrentTime = info.currentTime;
             }
         }
-
-        // 3. בדיקת "הודעות אירוע" ספציפיות
-        // לפעמים יוטיוב שולח onStateChange במקום infoDelivery
-        if (msgData.event === 'onStateChange' && msgData.data === 0) {
-            triggerNext();
-        }
-
     } catch (err) {}
 };
 
+function triggerNext() {
+    if (window.autoPlayTriggered) return;
+    window.autoPlayTriggered = true;
+    
+    // ניקוי המונים לסרטון הבא
+    stuckAtEndCounter = 0;
+    lastCurrentTime = -1;
+    
+    playNextInQueue();
+    
+    setTimeout(() => { window.autoPlayTriggered = false; }, 3000);
+}
 
         // --- עדכון UI מיידי מה-Base64 (כולל צפיות, לייקים וקטגוריה) ---
         if (document.getElementById('current-title')) 
@@ -434,20 +459,7 @@ async function playNextInQueue() {
     const encoded = btoa(encodeURIComponent(JSON.stringify(videoData)));
     preparePlay(encoded);
 }
-// פונקציית עזר למניעת כפילויות וביצוע המעבר
-function triggerNext() {
-    if (window.autoPlayTriggered) return;
-    
-    window.autoPlayTriggered = true;
-    console.log("מנגנון הגנה הופעל: עובר לסרטון הבא");
-    
-    playNextInQueue();
-    
-    // איפוס המנעול לאחר 3 שניות
-    setTimeout(() => { 
-        window.autoPlayTriggered = false; 
-    }, 3000);
-}
+
 
 function closePlayer() {
     const playerWin = document.getElementById('floating-player');
