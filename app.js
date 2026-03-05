@@ -303,6 +303,7 @@ async function preparePlay(encodedData) {
             playNextInQueue();
         }
 
+        const myOrigin = "https://shaulnac.github.io/FIE/";
         // --- יצירת או טעינת הנגן ---
         if (ytPlayer && typeof ytPlayer.loadVideoById === 'function') {
             ytPlayer.loadVideoById(data.id);
@@ -311,10 +312,15 @@ async function preparePlay(encodedData) {
                 videoId: data.id,
                 playerVars: {
                     'autoplay': 1,
-                    'enablejsapi': 1,
-                    'rel': 0,
-                    'origin': window.location.origin,
-                    'host': 'https://www.youtube-nocookie.com' // אופציונלי: שימוש ב-NoCookie גם ב-API
+                'mute': 0,
+                'controls': 1,
+                'origin': myOrigin,
+                'widget_referrer': myOrigin, // הפניה מלאה כולל התיקייה
+                'enablejsapi': 1,
+                'rel': 0,
+                'showinfo': 0,
+                'modestbranding': 1
+                    'host': 'https://www.youtube.com' // אופציונלי: שימוש ב-NoCookie גם ב-API
                 },
                 events: {
                     'onReady': (event) => {
