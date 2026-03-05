@@ -307,39 +307,44 @@ async function preparePlay(encodedData) {
                 style="opacity: 0; width: 100%; height: 100%; transition: opacity 0.5s ease; position: absolute; top: 0; left: 0; z-index: 2;"
                 onload="const loader = document.getElementById('player-loader'); if(loader) loader.style.display='none'; this.style.opacity='1';">
             </iframe>`;
-       window.onmessage = function(e) {
+      window.onmessage = function(e) {
     if (!e.origin.includes("youtube")) return;
     
     try {
         const msgData = JSON.parse(e.data);
-        
-        // 1. זיהוי סיום רגיל (מצב 0)
-        if (msgData.event === 'infoDelivery' && msgData.info && msgData.info.playerState === 0) {
-            console.log("סיום רגיל - עובר לבא");
-            playNextInQueue();
+        const info = msgData.info;
+
+        // הגנה מפני הפעלה כפולה
+        if (window.autoPlayTriggered) return;
+
+        // 1. בדיקת מצבי נגן (Player State)
+        // 0 = Ended (סיום רגיל)
+        // 4 = Video Cued (לפעמים קורה כשהסרטון נתקע בסוף)
+        if (info && (info.playerState === 0 || info.playerState === 4)) {
+            triggerNext();
             return;
         }
 
-        // 2. פתרון ל"מסך הצעות": בדיקת זמן נוכחי מול זמן סיום
-        // יוטיוב שולח עדכוני זמן (currentTime) ומשך סרטון (duration)
-        if (msgData.event === 'infoDelivery' && msgData.info && msgData.info.currentTime && msgData.info.duration) {
-            const timeLeft = msgData.info.duration - msgData.info.currentTime;
-            
-            // אם נשארה פחות משנייה אחת לסוף, והסרטון עדיין "כאילו" מנגן
-            if (timeLeft > 0 && timeLeft < 1.5) { 
-                console.log("מזהה הגעה לסוף הסרטון (לפני הצעות יוטיוב) - מפעיל אוטופליי");
-                // מונע הפעלה כפולה
-                if (!window.autoPlayTriggered) {
-                    window.autoPlayTriggered = true;
-                    playNextInQueue();
-                    
-                    // איפוס הטריגר אחרי 2 שניות כדי לאפשר את הסרטון הבא
-                    setTimeout(() => { window.autoPlayTriggered = false; }, 2000);
-                }
+        // 2. בדיקת זמן (גם בדילוגים)
+        if (info && info.currentTime && info.duration) {
+            const timeLeft = info.duration - info.currentTime;
+            // אם נשארו פחות מ-2 שניות (טווח רחב יותר לביטחון)
+            if (timeLeft > 0 && timeLeft < 2) {
+                triggerNext();
+                return;
             }
         }
+
+        // 3. בדיקת "הודעות אירוע" ספציפיות
+        // לפעמים יוטיוב שולח onStateChange במקום infoDelivery
+        if (msgData.event === 'onStateChange' && msgData.data === 0) {
+            triggerNext();
+        }
+
     } catch (err) {}
 };
+
+
         // --- עדכון UI מיידי מה-Base64 (כולל צפיות, לייקים וקטגוריה) ---
         if (document.getElementById('current-title')) 
             document.getElementById('current-title').textContent = data.t || "ללא כותרת";
@@ -428,6 +433,20 @@ async function playNextInQueue() {
     
     const encoded = btoa(encodeURIComponent(JSON.stringify(videoData)));
     preparePlay(encoded);
+}
+// פונקציית עזר למניעת כפילויות וביצוע המעבר
+function triggerNext() {
+    if (window.autoPlayTriggered) return;
+    
+    window.autoPlayTriggered = true;
+    console.log("מנגנון הגנה הופעל: עובר לסרטון הבא");
+    
+    playNextInQueue();
+    
+    // איפוס המנעול לאחר 3 שניות
+    setTimeout(() => { 
+        window.autoPlayTriggered = false; 
+    }, 3000);
 }
 
 function closePlayer() {
