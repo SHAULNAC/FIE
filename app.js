@@ -12,6 +12,11 @@ const VIDEOS_PER_PAGE = 50; // כמה סרטונים לטעון בכל פעם
 let isLoadingVideos = false;
 let hasMoreVideos = true;
 let currentSearchQuery = ""; 
+let userHistoryIds = []; // כאן נשמור רק את ה-IDs של הסרטונים שהמשתמש כבר ראה
+// אובייקט שיחזיק את המונים: מפתח הוא ID של סרטון, ערך הוא מספר הצפיות
+let videoWatchCounts = {};
+let displayResults = []; // מה שרואים בגריד
+let activeQueue = [];    // התור שממנו ה-Autoplay עובד
 
 const categoryMap = {
     "1": "כללי", "2": "רכבים", "10": "כללי", "15": "חיות מחמד",
@@ -191,6 +196,12 @@ async function getTranslation(text) {
 function renderVideoGrid(videos, isAppend = false) {
     const grid = document.getElementById('videoGrid');
     if (!grid) return;
+    // --- כאן להוסיף (שורה 180 בערך בקוד ששלחת) ---
+    if (!isAppend) {
+        displayResults = videos; 
+    } else {
+        displayResults = [...displayResults, ...videos];
+    }
 
     const htmlString = videos.map(v => {
         const videoId = v.id;
@@ -242,6 +253,7 @@ function renderVideoGrid(videos, isAppend = false) {
 async function preparePlay(encodedData) {
     try {
         const data = JSON.parse(decodeURIComponent(atob(encodedData)));
+        activeQueue = [...displayResults];
 
         // --- שליחה לגוגל אנליטיקס ---
         if (typeof gtag === 'function') {
@@ -295,7 +307,17 @@ async function preparePlay(encodedData) {
                 style="opacity: 0; width: 100%; height: 100%; transition: opacity 0.5s ease; position: absolute; top: 0; left: 0; z-index: 2;"
                 onload="const loader = document.getElementById('player-loader'); if(loader) loader.style.display='none'; this.style.opacity='1';">
             </iframe>`;
-        
+        window.onmessage = function(e) {
+    if (e.origin !== "https://www.youtube.com") return;
+    try {
+        const msgData = JSON.parse(e.data);
+        // בדיקה אם יוטיוב שלח הודעה שהסרטון הסתיים
+        if (msgData.event === 'infoDelivery' && msgData.info && msgData.info.playerState === 0) {
+            console.log("סרטון הסתיים, מפעיל אוטופליי...");
+            playNextInQueue();
+        }
+    } catch (err) {}
+};
         // --- עדכון UI מיידי מה-Base64 (כולל צפיות, לייקים וקטגוריה) ---
         if (document.getElementById('current-title')) 
             document.getElementById('current-title').textContent = data.t || "ללא כותרת";
@@ -341,6 +363,49 @@ async function preparePlay(encodedData) {
     } catch (e) { 
         console.error("שגיאה בהפעלת הסרטון:", e); 
     }
+}
+
+async function playNextInQueue() {
+    const iframe = document.getElementById('yt-iframe');
+    if (!iframe) return;
+
+    // 1. חילוץ ה-ID של הסרטון הנוכחי מהנגן
+    const currentId = iframe.src.match(/\/embed\/([^?]+)/)[1];
+    
+    // 2. מציאת המיקום שלו בתור הנוכחי (הגריד שעל המסך)
+    const currentIndex = activeQueue.findIndex(v => v.id === currentId);
+    let potentialNextVideos = activeQueue.slice(currentIndex + 1);
+
+    if (potentialNextVideos.length === 0) {
+        console.log("הגעת לסוף התור.");
+        return;
+    }
+
+    // 4. לוגיקת תעדוף (Sorting):
+    // ככל שלסרטון יש watch_count גבוה יותר ב-videoWatchCounts, הוא יידחק לסוף המערך.
+    potentialNextVideos.sort((a, b) => {
+        const countA = videoWatchCounts[a.id] || 0;
+        const countB = videoWatchCounts[b.id] || 0;
+        
+        // עדיפות לזה עם המספר הנמוך ביותר
+        return countA - countB;
+    });
+
+    // 5. בחירת ה"מנצח" (הסרטון בראש הרשימה הממוינת)
+    const nextVid = potentialNextVideos[0];
+
+    // 6. הפעלה מחדש של מנגנון הנגן
+    const videoData = {
+        id: nextVid.id,
+        t: nextVid.title,
+        c: nextVid.channel_title,
+        cat: categoryMap[nextVid.category_id] || "כללי",
+        v: nextVid.views_count,
+        l: nextVid.likes_count
+    };
+    
+    const encoded = btoa(encodeURIComponent(JSON.stringify(videoData)));
+    preparePlay(encoded);
 }
 
 function closePlayer() {
