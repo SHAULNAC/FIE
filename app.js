@@ -3,20 +3,24 @@ const SB_KEY = 'sb_publishable_2JftgVsArBG2NB-RXp0q4Q_jdd8VfPO';
 const client = supabase.createClient(SB_URL, SB_KEY);
 
 let currentUser = null;
-let analyticsTimeout = null; // טיימר ייעודי לאנליטיקס
+let analyticsTimeout = null; 
 let userFavorites = [];
 let debounceTimeout = null;
 let isPlaying = false;
 let loadedVideosCount = 0;
-const VIDEOS_PER_PAGE = 50; // כמה סרטונים לטעון בכל פעם
+const VIDEOS_PER_PAGE = 50; 
 let isLoadingVideos = false;
 let hasMoreVideos = true;
 let currentSearchQuery = ""; 
-let userHistoryIds = []; // כאן נשמור רק את ה-IDs של הסרטונים שהמשתמש כבר ראה
-// אובייקט שיחזיק את המונים: מפתח הוא ID של סרטון, ערך הוא מספר הצפיות
+let userHistoryIds = []; 
 let videoWatchCounts = {};
-let displayResults = []; // מה שרואים בגריד
-let activeQueue = [];    // התור שממנו ה-Autoplay עובד
+let displayResults = []; 
+let activeQueue = [];    
+
+// --- משתנים חדשים לניהול הנגן הרשמי ---
+let ytPlayer = null;
+let currentPlayingId = null;
+let safetyTimer = null;
 
 const categoryMap = {
     "1": "כללי", "2": "רכבים", "10": "כללי", "15": "חיות מחמד",
@@ -24,6 +28,11 @@ const categoryMap = {
     "24": "כללי", "25": "חדשות ופוליטיקה", "26": "מדריכים וסטייל",
     "27": "חינוך", "28": "מדע וטכנולוגיה"
 };
+
+// פונקציית חובה ל-API של יוטיוב
+function onYouTubeIframeAPIReady() {
+    console.log("YouTube API is ready");
+}
 
 // --- פונקציות עזר ---
 
@@ -52,7 +61,6 @@ function formatDuration(isoDuration) {
     parts.push(seconds.toString().padStart(2, '0'));
     return parts.join(':');
 }
-
 
 async function init() {
     try {
@@ -123,19 +131,16 @@ async function logout() {
 async function fetchVideos(query = "", isAppend = false) {
     if (isLoadingVideos) return;
     
-    // אם זו שאילתה חדשה, נאפס את מצב הטעינה
     if (!isAppend) {
         currentSearchQuery = query.trim();
         loadedVideosCount = 0;
         hasMoreVideos = true;
     } else if (!hasMoreVideos) {
-        // אם אין יותר סרטונים לטעון בגלילה, נעצור
         return;
     }
 
     isLoadingVideos = true;
     
-    // הגדרת טווח הסרטונים לטעינה נוכחית
     const from = loadedVideosCount;
     const to = from + VIDEOS_PER_PAGE - 1;
     let fetchedData = null;
@@ -152,7 +157,6 @@ async function fetchVideos(query = "", isAppend = false) {
             .range(from, to);
         fetchedData = data || [];
 
-        // טיפול בתרגום (יתבצע רק בחיפוש הראשוני, לא בגלילה)
         if (!isAppend) {
             clearTimeout(debounceTimeout);
             debounceTimeout = setTimeout(async () => {
@@ -160,7 +164,7 @@ async function fetchVideos(query = "", isAppend = false) {
                 if (translated && translated.toLowerCase() !== cleanQuery.toLowerCase()) {
                     const { data: transData } = await client.rpc('search_videos_prioritized', { search_term: translated }).range(0, VIDEOS_PER_PAGE - 1);
                     if (transData && transData.length > 0) {
-                        renderVideoGrid(transData, true); // נוסיף את התוצאות המתורגמות
+                        renderVideoGrid(transData, true); 
                     }
                 }
             }, 800);
@@ -171,7 +175,6 @@ async function fetchVideos(query = "", isAppend = false) {
         renderVideoGrid(fetchedData, isAppend);
         loadedVideosCount += fetchedData.length;
         
-        // אם קיבלנו פחות סרטונים ממה שביקשנו, סימן שאין יותר סרטונים במסד הנתונים
         if (fetchedData.length < VIDEOS_PER_PAGE) {
             hasMoreVideos = false;
         }
@@ -192,11 +195,11 @@ async function getTranslation(text) {
 }
 
 // --- רינדור ---
-// הוסף את הפרמטר isAppend עם ערך ברירת מחדל
+
 function renderVideoGrid(videos, isAppend = false) {
     const grid = document.getElementById('videoGrid');
     if (!grid) return;
-    // --- כאן להוסיף (שורה 180 בערך בקוד ששלחת) ---
+
     if (!isAppend) {
         displayResults = videos; 
     } else {
@@ -214,7 +217,8 @@ function renderVideoGrid(videos, isAppend = false) {
             c: v.channel_title,
             cat: categoryMap[v.category_id] || "כללי",
             v: v.views_count,
-            l: v.likes_count
+            l: v.likes_count,
+            duration: v.duration // הוספנו כדי שיהיה זמין לנגן
         };
 
         const encodedData = btoa(encodeURIComponent(JSON.stringify(videoData)));
@@ -249,37 +253,16 @@ function renderVideoGrid(videos, isAppend = false) {
     }
 }
 
-let lastCurrentTime = -1;
-let stuckAtEndCounter = 0;
+// --- ניהול הנגן (עודכן ל-API רשמי) ---
 
 async function preparePlay(encodedData) {
-    // 1. איפוס משתני בקרה וניהול תור
     window.autoPlayTriggered = false;
-    let lastTime = -1;
-    let stuckCounter = 0;
-    let hasStartedPlaying = false; 
-    let bufferingStartTime = 0;
-    activeQueue = [...displayResults];
-
-    // 2. פונקציית הדילוג (מוגדרת פנימית)
-    function triggerNext() {
-        if (window.autoPlayTriggered) return;
-        window.autoPlayTriggered = true;
-        clearTimeout(deadOnArrivalTimer); 
-        console.log("מעבר אוטומטי הופעל...");
-        playNextInQueue();
-    }
-
-    // 3. טיימר הגנה "מת בהגעה"
-    const deadOnArrivalTimer = setTimeout(() => {
-        if (!hasStartedPlaying) {
-            console.warn("סרטון לא התחיל לנגן. מדלג...");
-            triggerNext();
-        }
-    }, 12000);
-
+    clearTimeout(safetyTimer); // איפוס טיימר בטיחות קודם
+    
     try {
         const data = JSON.parse(decodeURIComponent(atob(encodedData)));
+        currentPlayingId = data.id; // עדכון המזהה הנוכחי
+        activeQueue = [...displayResults];
 
         // --- שליחה לגוגל אנליטיקס ---
         if (typeof gtag === 'function') {
@@ -292,9 +275,8 @@ async function preparePlay(encodedData) {
 
         const playerWin = document.getElementById('floating-player');
         const playerBar = document.getElementById('main-player-bar'); 
-        const container = document.getElementById('youtubePlayer');
         
-        if (!playerWin || !container) return;
+        if (!playerWin) return;
 
         // --- אנימציית פתיחה ---
         playerWin.style.display = 'flex'; 
@@ -312,66 +294,61 @@ async function preparePlay(encodedData) {
             playerBar.classList.add('show-player'); 
         }
 
-        // --- הגדרת הנגן ---
-        const videoParams = new URLSearchParams({
-            autoplay: 1,
-            enablejsapi: 1,
-            rel: 0,
-            origin: window.location.origin
-        });
+        // פונקציית מעבר פנימית
+        function triggerNext() {
+            if (window.autoPlayTriggered) return;
+            window.autoPlayTriggered = true;
+            clearTimeout(safetyTimer);
+            console.log("מעבר אוטומטי הופעל...");
+            playNextInQueue();
+        }
 
-        container.innerHTML = `
-            <div id="player-loader" class="player-loader"><i class="fa-solid fa-play"></i></div>
-            <iframe id="yt-iframe" 
-                src="https://www.youtube-nocookie.com/embed/${data.id}?${videoParams.toString()}" 
-                frameborder="0" allow="autoplay; encrypted-media" allowfullscreen
-                style="opacity: 0; width: 100%; height: 100%; position: absolute; top:0; left:0; z-index:2; transition: opacity 0.5s;"
-                onload="const loader = document.getElementById('player-loader'); if(loader) loader.style.display='none'; this.style.opacity='1';">
-            </iframe>`;
-
-        // --- המאזין להודעות מיוטיוב ---
-        window.onmessage = function(e) {
-            if (!e.origin.includes("youtube")) return;
-            try {
-                const msgData = JSON.parse(e.data);
-                if (window.autoPlayTriggered) return;
-
-                if (msgData.event === 'onError' || msgData.event === 'error') {
-                    triggerNext();
-                    return;
-                }
-
-                const info = msgData.info;
-                if (!info) return;
-
-                if (info.playerState !== undefined) {
-                    if (info.playerState === 1) {
-                        hasStartedPlaying = true;
-                        clearTimeout(deadOnArrivalTimer);
-                    }
-                    if (info.playerState === 3) {
-                        if (bufferingStartTime === 0) bufferingStartTime = Date.now();
-                        else if (Date.now() - bufferingStartTime > 15000) triggerNext();
-                    } else {
-                        bufferingStartTime = 0;
-                    }
-                    if (info.playerState === 0) triggerNext();
-                }
-
-                if (hasStartedPlaying && info.currentTime && info.duration) {
-                    const timeLeft = info.duration - info.currentTime;
-                    if (timeLeft < 5) {
-                        if (info.currentTime === lastTime) {
-                            stuckCounter++;
-                            if (stuckCounter > 3) triggerNext();
-                        } else {
-                            stuckCounter = 0;
-                            lastTime = info.currentTime;
+        // --- יצירת או טעינת הנגן ---
+        if (ytPlayer && typeof ytPlayer.loadVideoById === 'function') {
+            ytPlayer.loadVideoById(data.id);
+        } else {
+            ytPlayer = new YT.Player('youtubePlayer', {
+                videoId: data.id,
+                playerVars: {
+                    'autoplay': 1,
+                    'enablejsapi': 1,
+                    'rel': 0,
+                    'origin': window.location.origin,
+                    'host': 'https://www.youtube-nocookie.com' // אופציונלי: שימוש ב-NoCookie גם ב-API
+                },
+                events: {
+                    'onReady': (event) => {
+                        event.target.playVideo();
+                    },
+                    'onStateChange': (event) => {
+                        if (event.data === YT.PlayerState.PLAYING) {
+                            isPlaying = true;
+                            updatePlayStatus(true);
+                            
+                            // הפעלת טיימר בטיחות (רשת ביטחון לנטפרי)
+                            clearTimeout(safetyTimer);
+                            const duration = ytPlayer.getDuration() || 300; // ברירת מחדל 5 דקות אם נכשל
+                            if (duration > 0) {
+                                safetyTimer = setTimeout(() => {
+                                    console.warn("טיימר בטיחות פקע - מפעיל מעבר לסרטון הבא");
+                                    triggerNext();
+                                }, (duration + 5) * 1000); // 5 שניות מרווח
+                            }
+                            
+                        } else if (event.data === YT.PlayerState.PAUSED) {
+                            isPlaying = false;
+                            updatePlayStatus(false);
+                        } else if (event.data === YT.PlayerState.ENDED) {
+                            triggerNext();
                         }
+                    },
+                    'onError': (event) => {
+                        console.error("שגיאת יוטיוב API, מדלג...", event.data);
+                        triggerNext();
                     }
                 }
-            } catch (err) {}
-        };
+            });
+        }
 
         // --- עדכון UI ---
         document.getElementById('current-title').textContent = data.t || "ללא כותרת";
@@ -380,7 +357,6 @@ async function preparePlay(encodedData) {
         document.getElementById('stat-likes').innerHTML = `<i class="fa-solid fa-thumbs-up"></i> ${data.l || 0}`;
         if (document.getElementById('current-category')) document.getElementById('current-category').textContent = data.cat || "כללי";
 
-        // --- נתונים מסופבייס ---
         const descElem = document.getElementById('bottom-description');
         if (descElem) descElem.textContent = "טוען תיאור...";
 
@@ -398,15 +374,11 @@ async function preparePlay(encodedData) {
         console.error("שגיאה בהפעלת הסרטון:", e);
     }
 }
-async function playNextInQueue() {
-    const iframe = document.getElementById('yt-iframe');
-    if (!iframe) return;
 
-    // 1. חילוץ ה-ID של הסרטון הנוכחי מהנגן
-    const currentId = iframe.src.match(/\/embed\/([^?]+)/)[1];
-    
-    // 2. מציאת המיקום שלו בתור הנוכחי (הגריד שעל המסך)
-    const currentIndex = activeQueue.findIndex(v => v.id === currentId);
+async function playNextInQueue() {
+    if (!currentPlayingId) return;
+
+    const currentIndex = activeQueue.findIndex(v => v.id === currentPlayingId);
     let potentialNextVideos = activeQueue.slice(currentIndex + 1);
 
     if (potentialNextVideos.length === 0) {
@@ -414,20 +386,14 @@ async function playNextInQueue() {
         return;
     }
 
-    // 4. לוגיקת תעדוף (Sorting):
-    // ככל שלסרטון יש watch_count גבוה יותר ב-videoWatchCounts, הוא יידחק לסוף המערך.
     potentialNextVideos.sort((a, b) => {
         const countA = videoWatchCounts[a.id] || 0;
         const countB = videoWatchCounts[b.id] || 0;
-        
-        // עדיפות לזה עם המספר הנמוך ביותר
         return countA - countB;
     });
 
-    // 5. בחירת ה"מנצח" (הסרטון בראש הרשימה הממוינת)
     const nextVid = potentialNextVideos[0];
 
-    // 6. הפעלה מחדש של מנגנון הנגן
     const videoData = {
         id: nextVid.id,
         t: nextVid.title,
@@ -441,19 +407,22 @@ async function playNextInQueue() {
     preparePlay(encoded);
 }
 
-
 function closePlayer() {
     const playerWin = document.getElementById('floating-player');
-    const container = document.getElementById('youtubePlayer');
     const playerBar = document.getElementById('main-player-bar');
     
     if (playerWin) playerWin.style.display = 'none';
-    if (container) container.innerHTML = ''; 
     if (playerBar) {
         playerBar.classList.remove('show-player');
         playerBar.classList.add('hidden-player');
     }
     
+    // במקום לדרוס את ה-HTML ולהרוס את האובייקט, פשוט עוצרים אותו
+    if (ytPlayer && typeof ytPlayer.stopVideo === 'function') {
+        ytPlayer.stopVideo();
+    }
+    
+    clearTimeout(safetyTimer);
     isPlaying = false;
     updatePlayStatus(false);
 }
@@ -467,7 +436,6 @@ function initDraggable() {
     let offsetX, offsetY;
 
     handle.addEventListener('mousedown', (e) => {
-        // מונע גרירה אם לוחצים על כפתור הסגירה
         if (e.target.closest('button')) return;
 
         isDragging = true;
@@ -475,14 +443,14 @@ function initDraggable() {
         offsetX = e.clientX - rect.left;
         offsetY = e.clientY - rect.top;
         
-        // ממיר את ה-right/bottom למיקומים אבסולוטיים כדי שהגרירה תעבוד מושלם
         player.style.right = 'auto';
         player.style.bottom = 'auto';
         player.style.left = rect.left + 'px';
         player.style.top = rect.top + 'px';
         player.style.transition = 'none'; 
         
-        const iframe = document.getElementById('yt-iframe');
+        // יצירת שכבת מגן שקופה כדי שהעכבר לא "ייתקע" בתוך ה-Iframe בזמן גרירה
+        const iframe = document.getElementById('youtubePlayer');
         if(iframe) iframe.style.pointerEvents = 'none';
     });
 
@@ -492,7 +460,6 @@ function initDraggable() {
         let x = e.clientX - offsetX;
         let y = e.clientY - offsetY;
         
-        // שומר שהחלון לא ייצא מגבולות המסך
         x = Math.max(0, Math.min(x, window.innerWidth - player.offsetWidth));
         y = Math.max(0, Math.min(y, window.innerHeight - player.offsetHeight));
 
@@ -503,7 +470,7 @@ function initDraggable() {
     document.addEventListener('mouseup', () => {
         if (!isDragging) return;
         isDragging = false;
-        const iframe = document.getElementById('yt-iframe');
+        const iframe = document.getElementById('youtubePlayer');
         if(iframe) iframe.style.pointerEvents = 'auto';
     });
 }
@@ -530,23 +497,21 @@ function initResizer() {
         player.style.left = rect.left + 'px';
         player.style.transition = 'none';
 
-        const iframe = document.getElementById('yt-iframe');
+        const iframe = document.getElementById('youtubePlayer');
         if(iframe) iframe.style.pointerEvents = 'none';
 
         function doResize(re) {
-            // חישוב מתמטי לפינה השמאלית-תחתונה:
             const diffX = re.clientX - startX;
             const diffY = re.clientY - startY;
 
-            // מאחר ומושכים שמאלה, diffX הוא שלילי - לכן מחסרים אותו כדי להגדיל את הרוחב
             const newWidth = startWidth - diffX; 
             const newHeight = startHeight + diffY;
 
-            if(newWidth > 280) { // רוחב מינימלי
+            if(newWidth > 280) { 
                 player.style.width = newWidth + 'px';
                 player.style.left = (rect.left + diffX) + 'px'; 
             }
-            if(newHeight > 180) { // גובה מינימלי
+            if(newHeight > 180) { 
                 player.style.height = newHeight + 'px';
             }
         }
@@ -561,13 +526,16 @@ function initResizer() {
         window.addEventListener('mouseup', stopResize);
     });
 }
+
 function togglePlayPause() {
-    const iframe = document.getElementById('yt-iframe');
-    if (!iframe) return;
-    const action = isPlaying ? 'pauseVideo' : 'playVideo';
-    iframe.contentWindow.postMessage(JSON.stringify({"event": "command", "func": action, "args": ""}), "*");
-    isPlaying = !isPlaying;
-    updatePlayStatus(isPlaying);
+    if (!ytPlayer || typeof ytPlayer.getPlayerState !== 'function') return;
+    
+    const state = ytPlayer.getPlayerState();
+    if (state === YT.PlayerState.PLAYING) {
+        ytPlayer.pauseVideo();
+    } else {
+        ytPlayer.playVideo();
+    }
 }
 
 function updatePlayStatus(playing) {
@@ -659,37 +627,29 @@ window.onclick = function(event) {
     }
 }
 
-// מאזין לאירועי גלילה של אזור התוכן הראשי
 const contentArea = document.querySelector('.content');
 if (contentArea) {
     contentArea.addEventListener('scroll', () => {
-        // בודק אם הגענו כמעט לתחתית של אזור התוכן (במרחק 200 פיקסלים)
         if (contentArea.scrollTop + contentArea.clientHeight >= contentArea.scrollHeight - 200) {
             if (!isLoadingVideos && hasMoreVideos) {
-                // מפעיל את פונקציית הטעינה במצב שרשור (isAppend = true)
                 fetchVideos(currentSearchQuery, true);
             }
         }
     });
-}// --- אתחול ---
+}
 
-// מאזין לחיפוש: חיפוש מיידי, דיווח לאנליטיקס מושהה
 document.getElementById('globalSearch').addEventListener('input', (e) => {
     const query = e.target.value.trim();
-    
-    // 1. ביצוע החיפוש עצמו - קורה מיד ללא המתנה
     fetchVideos(query);
 
-    // 2. ניהול הדיווח לאנליטיקס - המתנה של 2 שניות מסיום ההקלדה
-    clearTimeout(analyticsTimeout); // מאפס את הטיימר בכל לחיצת מקש
-
+    clearTimeout(analyticsTimeout); 
     if (query.length > 0) {
         analyticsTimeout = setTimeout(() => {
             if (typeof gtag === 'function') {
                 gtag('event', 'search', {
                     'search_term': query
                 });
-                console.log("Analytics: Search tracked (2s idle) -> " + query);
+                console.log("Analytics: Search tracked -> " + query);
             }
         }, 2000);
     }
