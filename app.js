@@ -307,15 +307,21 @@ async function preparePlay(encodedData) {
                 style="opacity: 0; width: 100%; height: 100%; transition: opacity 0.5s ease; position: absolute; top: 0; left: 0; z-index: 2;"
                 onload="const loader = document.getElementById('player-loader'); if(loader) loader.style.display='none'; this.style.opacity='1';">
             </iframe>`;
-        window.onmessage = function(e) {
-    if (e.origin !== "https://www.youtube.com") return;
+       window.onmessage = function(e) {
+    // נטפרי לפעמים משנה את ה-origin, אז נבדוק אם זה מכיל youtube
+    if (!e.origin.includes("youtube")) return; 
+    
     try {
         const msgData = JSON.parse(e.data);
-        // בדיקה אם יוטיוב שלח הודעה שהסרטון הסתיים
-        if (msgData.event === 'infoDelivery' && msgData.info && msgData.info.playerState === 0) {
-            console.log("סרטון הסתיים, מפעיל אוטופליי...");
-            playNextInQueue();
+        
+        // נשתמש בבדיקה רחבה יותר למקרה שנטפרי מסננת חלק מהמידע
+        if (msgData.event === 'infoDelivery' && msgData.info) {
+            if (msgData.info.playerState === 0) {
+                console.log("זוהה סיום סרטון (נטפרי), מפעיל אוטופליי...");
+                playNextInQueue();
+            }
         }
+   
     } catch (err) {}
 };
         // --- עדכון UI מיידי מה-Base64 (כולל צפיות, לייקים וקטגוריה) ---
