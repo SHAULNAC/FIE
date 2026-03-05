@@ -310,6 +310,7 @@ async function preparePlay(encodedData) {
         } else {
             ytPlayer = new YT.Player('youtubePlayer', {
                 videoId: data.id,
+                host: 'https://www.youtube.com',
                 playerVars: {
                     'autoplay': 1,
                 'mute': 0,
@@ -320,7 +321,6 @@ async function preparePlay(encodedData) {
                 'rel': 0,
                 'showinfo': 0,
                 'modestbranding': 1
-                    'host': 'https://www.youtube.com' // אופציונלי: שימוש ב-NoCookie גם ב-API
                 },
                 events: {
                     'onReady': (event) => {
