@@ -16,7 +16,7 @@ let userHistoryIds = [];
 let videoWatchCounts = {};
 let displayResults = []; 
 let activeQueue = [];    
-
+let currentAppMode = 'home'; // יכול להיות 'home', 'history', או 'favorites'
 // --- משתנים חדשים לניהול הנגן הרשמי ---
 let ytPlayer = null;
 let currentPlayingId = null;
@@ -130,6 +130,7 @@ async function logout() {
 
 async function fetchVideos(query = "", isAppend = false) {
     if (isLoadingVideos) return;
+    currentAppMode = 'home';
     
     if (!isAppend) {
         currentSearchQuery = query.trim();
@@ -160,7 +161,7 @@ async function fetchVideos(query = "", isAppend = false) {
         if (!isAppend) {
             clearTimeout(debounceTimeout);
             debounceTimeout = setTimeout(async () => {
-                const translated = await getTranslation(cleanQuery);
+                const translated = await getTranslationWithDB(cleanQuery);
                 if (translated && translated.toLowerCase() !== cleanQuery.toLowerCase()) {
                     const { data: transData } = await client.rpc('search_videos_prioritized', { search_term: translated }).range(0, VIDEOS_PER_PAGE - 1);
                     if (transData && transData.length > 0) {
@@ -186,12 +187,47 @@ async function fetchVideos(query = "", isAppend = false) {
     isLoadingVideos = false;
 }
 
-async function getTranslation(text) {
+// הגדרות טבלת התרגומים (שנה אותן לפי מה שהגדרת ב-Supabase)
+const TRANSLATION_TABLE = 'translation_cache'; // שם הטבלה
+const COL_ORIGINAL = 'original_text';             // עמודת מונח המקור (עברית)
+const COL_TRANSLATED = 'translated_text';          // עמודת התרגום (אנגלית)
+
+async function getTranslationWithDB(text) {
+    if (!text) return null;
+    
     try {
+        // שלב 1: נבדוק אם התרגום כבר קיים במסד הנתונים
+        const { data: existingTranslation, error: fetchError } = await client
+            .from(TRANSLATION_TABLE)
+            .select(COL_TRANSLATED)
+            .eq(COL_ORIGINAL, text)
+            .single();
+
+        if (existingTranslation && existingTranslation[COL_TRANSLATED]) {
+            console.log("נמצא תרגום ב-Supabase!");
+            return existingTranslation[COL_TRANSLATED];
+        }
+
+        // שלב 2: אם לא קיים, נבקש מגוגל טרנסלייט
         const res = await fetch(`https://translate.googleapis.com/translate_a/single?client=gtx&sl=iw&tl=en&dt=t&q=${encodeURI(text)}`);
         const data = await res.json();
-        return data[0][0][0];
-    } catch (e) { return null; }
+        const translatedText = data[0][0][0];
+
+        // שלב 3: נשמור את התוצאה החדשה במסד הנתונים לפעם הבאה
+        if (translatedText && translatedText.toLowerCase() !== text.toLowerCase()) {
+            await client.from(TRANSLATION_TABLE).insert([
+                { 
+                    [COL_ORIGINAL]: text, 
+                    [COL_TRANSLATED]: translatedText 
+                }
+            ]);
+        }
+        
+        return translatedText;
+    } catch (e) {
+        console.error("שגיאה בתהליך התרגום:", e);
+        return null;
+    }
 }
 
 // --- רינדור ---
@@ -610,9 +646,27 @@ async function loadSidebarLists() {
         `;
     }
 }
+function goHome() {
+    // 1. עדכון המצב חזרה לדף הבית כדי שהגלילה תעבוד שוב
+    currentAppMode = 'home';
+
+    // 2. עדכון הכותרת הראשית (אם יש לך אחת כזו)
+    const title = document.getElementById('main-title');
+    if (title) title.textContent = "דף הבית"; // שנה לטקסט שמתאים לך
+
+    // 3. איפוס שורת החיפוש (כדי למחוק חיפוש קודם אם היה)
+    const searchInput = document.getElementById('globalSearch');
+    if (searchInput) searchInput.value = "";
+
+    // 4. קריאה לפונקציית טעינת הסרטונים
+    // כשאנחנו קוראים לה ככה, היא כבר מאפסת את המשתנים (loadedVideosCount, hasMoreVideos)
+    // בזכות בלוק ה- if (!isAppend) שכבר קיים אצלך בקוד!
+    fetchVideos("");
+}
 
 async function displayHistory() {
     if (!currentUser) return;
+    currentAppMode = 'history';
     const { data } = await client.from('history').select('*, videos(*)').eq('user_id', currentUser.id).order('created_at', { ascending: false });
     const title = document.getElementById('main-title');
     if (title) title.textContent = "היסטוריית צפייה";
@@ -621,6 +675,7 @@ async function displayHistory() {
 
 async function displayFavorites() {
     if (!currentUser) return;
+    currentAppMode = 'favorites';
     const { data } = await client.from('favorites').select('*, videos(*)').eq('user_id', currentUser.id);
     const title = document.getElementById('main-title');
     if (title) title.textContent = "מועדפים";
@@ -648,7 +703,8 @@ const contentArea = document.querySelector('.content');
 if (contentArea) {
     contentArea.addEventListener('scroll', () => {
         if (contentArea.scrollTop + contentArea.clientHeight >= contentArea.scrollHeight - 200) {
-            if (!isLoadingVideos && hasMoreVideos) {
+            // טוען רק אם אנחנו בעמוד הראשי (או חיפוש) ולא בהיסטוריה/מועדפים
+            if (currentAppMode === 'home' && !isLoadingVideos && hasMoreVideos) {
                 fetchVideos(currentSearchQuery, true);
             }
         }
