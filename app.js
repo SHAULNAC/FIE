@@ -196,7 +196,7 @@ async function getTranslationWithDB(text) {
     if (!text) return null;
     
     try {
-        // שלב 1: נבדוק אם התרגום כבר קיים במסד הנתונים
+        // 1. בדיקה אם המונח כבר קיים במסד הנתונים
         const { data: existingTranslation, error: fetchError } = await client
             .from(TRANSLATION_TABLE)
             .select(COL_TRANSLATED)
@@ -204,28 +204,42 @@ async function getTranslationWithDB(text) {
             .single();
 
         if (existingTranslation && existingTranslation[COL_TRANSLATED]) {
-            console.log("נמצא תרגום ב-Supabase!");
             return existingTranslation[COL_TRANSLATED];
         }
 
-        // שלב 2: אם לא קיים, נבקש מגוגל טרנסלייט
-        const res = await fetch(`https://translate.googleapis.com/translate_a/single?client=gtx&sl=iw&tl=en&dt=t&q=${encodeURI(text)}`);
+        // 2. פנייה לגוגל עם בקשה לתרגום (dt=t) ותעתיק (dt=rm)
+        const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=iw&tl=en&dt=t&dt=rm&q=${encodeURI(text)}`;
+        const res = await fetch(url);
         const data = await res.json();
-        const translatedText = data[0][0][0];
 
-        // שלב 3: נשמור את התוצאה החדשה במסד הנתונים לפעם הבאה
-        if (translatedText && translatedText.toLowerCase() !== text.toLowerCase()) {
+        // חילוץ התרגום המילולי (למשל: Good day)
+        const translation = data[0][0][0];
+        
+        // חילוץ התעתיק הפונטי (למשל: yom tov)
+        // בדרך כלל המידע נמצא במיקום הזה במערך של גוגל
+        let transliteration = "";
+        if (data[0][1] && (data[0][1][3] || data[0][1][2])) {
+            transliteration = data[0][1][3] || data[0][1][2];
+        }
+
+        // 3. שילוב של שניהם למחרוזת אחת שתשמר ב-DB
+        // אנחנו שומרים "Good day yom tov" כדי שהחיפוש ימצא את שניהם
+        const combinedResult = transliteration 
+            ? `${translation} ${transliteration}` 
+            : translation;
+
+        if (combinedResult && combinedResult.toLowerCase() !== text.toLowerCase()) {
             await client.from(TRANSLATION_TABLE).insert([
                 { 
                     [COL_ORIGINAL]: text, 
-                    [COL_TRANSLATED]: translatedText 
+                    [COL_TRANSLATED]: combinedResult 
                 }
             ]);
         }
         
-        return translatedText;
+        return combinedResult;
     } catch (e) {
-        console.error("שגיאה בתהליך התרגום:", e);
+        console.error("שגיאה בתהליך התרגום והתעתיק:", e);
         return null;
     }
 }
