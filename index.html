@@ -32,22 +32,20 @@
     <div class="sidebar-wrapper"></div>
 
     <aside class="sidebar" id="sidebar">
-    <div id="user-profile" class="user-item-wrapper">
-        </div>
-
-    <nav class="nav-menu">
-        <div class="nav-link active" onclick="goHome()">
-            <i class="fa-solid fa-house"></i>
-            <span class="nav-text">דף הבית</span>
-        </div>
-        <div class="nav-link" onclick="focusSearch()">
-            <i class="fa-solid fa-magnifying-glass"></i>
-            <span class="nav-text">חיפוש</span>
-        </div>
-        <div id="dynamic-nav">
+        <div class="nav-card top-icons">
+            <div id="user-profile" class="user-item">
+                <button class="btn-login" onclick="login()" title="התחבר עם Google"><span>התחבר</span></button>
             </div>
-    </nav>
-</aside>
+            
+            <div class="nav-link active" onclick="goHome()" title="בית">
+                <i class="fa-solid fa-house"></i>
+                <span class="nav-text">בית</span>
+            </div>
+            <div class="nav-link" onclick="document.getElementById('globalSearch').focus()" title="חיפוש">
+                <i class="fa-solid fa-magnifying-glass"></i>
+                <span class="nav-text">חיפוש</span>
+            </div>
+        </div>
 
         <div class="nav-card library">
             <div id="favorites-list" class="sidebar-list">
