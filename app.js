@@ -147,15 +147,15 @@ function updateUserUI() {
     if (currentUser && currentUser.user_metadata) {
         const avatar = currentUser.user_metadata.avatar_url || "";
         userDiv.innerHTML = `
-            <div style="display:flex; align-items:center; gap:10px;">
-                ${avatar ? `<img src="${avatar}" style="width:35px; border-radius:50%; border: 2px solid #1DB954;">` : ''}
-                <div style="display:flex; flex-direction:column;">
+            <div style="display:flex; align-items:center; gap:15px; width: 100%;">
+                ${avatar ? `<img src="${avatar}" class="profile-avatar">` : '<div class="profile-avatar"><i class="fa-solid fa-user"></i></div>'}
+                <div class="user-text-details" style="display:flex; flex-direction:column;">
                     <span style="font-size:14px; font-weight:bold;">${escapeHtml(currentUser.user_metadata.full_name)}</span>
                     <span onclick="logout()" style="color:#b3b3b3; font-size:11px; cursor:pointer; text-decoration:none;">התנתק</span>
                 </div>
             </div>`;
     } else {
-        userDiv.innerHTML = `<button class="btn-login" onclick="login()">התחבר עם Google</button>`;
+        userDiv.innerHTML = `<button class="btn-login" onclick="login()" title="התחבר עם Google"><span>התחבר עם Google</span></button>`;
     }
 }
 
@@ -747,13 +747,13 @@ async function loadSidebarLists() {
     const sidebarList = document.getElementById('favorites-list');
     if (sidebarList) {
         sidebarList.innerHTML = `
-            <div class="nav-link" onclick='displayHistory()'>
+            <div class="nav-link" onclick='displayHistory()' title="היסטוריית צפייה">
                 <i class="fa-solid fa-clock-rotate-left"></i>
-                <span>היסטוריית צפייה</span>
+                <span class="nav-text">היסטוריית צפייה</span>
             </div>
-            <div class="nav-link" onclick='displayFavorites()'>
+            <div class="nav-link" onclick='displayFavorites()' title="סרטונים שאהבתי">
                 <i class="fa-solid fa-heart"></i>
-                <span>סרטונים שאהבתי</span>
+                <span class="nav-text">סרטונים שאהבתי</span>
             </div>
         `;
     }
