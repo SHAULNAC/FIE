@@ -62,6 +62,54 @@ function formatDuration(isoDuration) {
     return parts.join(':');
 }
 
+// --- ניהול מודל מותאם אישית ---
+function showCustomAlert(title, message, btnText, action) {
+    document.getElementById('alert-title').textContent = title;
+    document.getElementById('alert-message').textContent = message;
+    const actionBtn = document.getElementById('alert-action-btn');
+    actionBtn.textContent = btnText;
+    actionBtn.onclick = () => {
+        if(action) action();
+        closeCustomAlert();
+    };
+    document.getElementById('custom-alert-modal').style.display = 'flex';
+}
+
+function closeCustomAlert() {
+    document.getElementById('custom-alert-modal').style.display = 'none';
+}
+
+// --- חיפוש קולי ---
+function startVoiceSearch() {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+        showCustomAlert('אופס', 'הדפדפן שלך לא תומך בחיפוש קולי. אנא נסה להקליד את החיפוש.', 'הבנתי', null);
+        return;
+    }
+    const recognition = new SpeechRecognition();
+    recognition.lang = 'he-IL';
+    
+    recognition.onstart = function() {
+        document.getElementById('voiceSearchBtn').classList.add('recording');
+        document.getElementById('globalSearch').placeholder = "מקשיב...";
+    };
+    
+    recognition.onresult = function(event) {
+        const transcript = event.results[0][0].transcript;
+        const searchInput = document.getElementById('globalSearch');
+        searchInput.value = transcript;
+        fetchVideos(transcript);
+        triggerAnalytics(transcript);
+    };
+    
+    recognition.onend = function() {
+        document.getElementById('voiceSearchBtn').classList.remove('recording');
+        document.getElementById('globalSearch').placeholder = "חפש סרטונים...";
+    };
+    
+    recognition.start();
+}
+
 async function init() {
     try {
         const { data: { user } } = await client.auth.getUser();
@@ -315,13 +363,16 @@ async function preparePlay(encodedData) {
         activeQueue = [...displayResults];
 
         // --- שליחה לגוגל אנליטיקס ---
-        if (typeof gtag === 'function') {
-            gtag('event', 'video_start', {
-                'video_title': data.t,
-                'video_id': data.id,
-                'video_category': data.cat || "כללי"
-            });
-        }
+        // עדכון בתוך preparePlay (בחלק של שליחה לאנליטיקס):
+if (typeof gtag === 'function') {
+    const userName = currentUser ? currentUser.user_metadata.full_name : 'Guest';
+    gtag('event', 'video_start', {
+        'video_title': data.t,
+        'video_id': data.id,
+        'video_category': data.cat || "כללי",
+        'user_name': userName
+    });
+}
 
         const playerWin = document.getElementById('floating-player');
         const playerBar = document.getElementById('main-player-bar'); 
@@ -649,7 +700,16 @@ function updatePlayStatus(playing) {
 }
 
 async function toggleFavorite(videoId) {
-    if (!currentUser) return alert("עליך להתחבר כדי להוסיף למועדפים");
+    if (!currentUser) {
+        showCustomAlert(
+            'רוצה לשמור את הסרטון?',
+            'התחבר עכשיו בחינם כדי לשמור את הסרטונים שאתה הכי אוהב ולגשת אליהם מכל מכשיר בקלות ובמהירות!',
+            'התחבר עם Google',
+            login
+        );
+        return;
+    }
+    // ... המשך הקוד הקיים של הפונקציה 
     const isFav = userFavorites.includes(videoId);
     if (isFav) {
         await client.from('favorites').delete().eq('user_id', currentUser.id).eq('video_id', videoId);
@@ -798,17 +858,22 @@ searchInput.addEventListener('keydown', (e) => {
 });
 
 // פונקציית עזר לטיפול באנליטיקס כדי למנוע כפילות קוד
+// עדכון בתוך triggerAnalytics:
 function triggerAnalytics(query) {
     if (query.length > 0) {
         analyticsTimeout = setTimeout(() => {
             if (typeof gtag === 'function') {
+                const userName = currentUser ? currentUser.user_metadata.full_name : 'Guest';
                 gtag('event', 'search', {
-                    'search_term': query
+                    'search_term': query,
+                    'user_name': userName
                 });
-                console.log("Analytics: Search tracked -> " + query);
+                console.log("Analytics: Search tracked -> " + query + " by " + userName);
             }
-        }, 2000); // האנליטיקס עדיין יישלח בדיליי של שתי שניות לאחר ביצוע החיפוש
+        }, 2000); 
     }
 }
+
+
 
 init();
