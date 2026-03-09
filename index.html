@@ -29,20 +29,21 @@
 </head>
 <body>
 
-    <aside class="sidebar">
-        <div class="nav-card brand-section">
-            <img src="favicon.ico" class="brand-icon" alt="Logo">
-            <div class="brand-title">Fast Insight Explorer</div>
-        </div>
-        <div class="nav-card">
+    <div class="sidebar-wrapper"></div>
+
+    <aside class="sidebar" id="sidebar">
+        <div class="nav-card top-icons">
             <div id="user-profile" class="user-item">
-                <button class="btn-login" onclick="login()">התחבר עם Google</button>
+                <button class="btn-login" onclick="login()" title="התחבר עם Google"><span>התחבר</span></button>
             </div>
-            <div class="nav-link active" onclick="goHome()">
-                <i class="fa-solid fa-house"></i> בית
+            
+            <div class="nav-link active" onclick="goHome()" title="בית">
+                <i class="fa-solid fa-house"></i>
+                <span class="nav-text">בית</span>
             </div>
-            <div class="nav-link" onclick="document.getElementById('globalSearch').focus()">
-                <i class="fa-solid fa-magnifying-glass"></i> חיפוש
+            <div class="nav-link" onclick="document.getElementById('globalSearch').focus()" title="חיפוש">
+                <i class="fa-solid fa-magnifying-glass"></i>
+                <span class="nav-text">חיפוש</span>
             </div>
         </div>
 
@@ -50,22 +51,20 @@
             <div id="favorites-list" class="sidebar-list">
                 </div>
         </div>
-
-        <div class="nav-card settings-card">
-            <div class="nav-link" onclick="showPrivacy()">
-                <i class="fa-solid fa-shield-halved"></i> 
-                <span>פרטיות ותנאים</span>
-            </div>
-        </div>
     </aside>
 
     <main class="content">
-        <header class="top-nav">
+        <header class="main-header">
+            <div class="brand-centered">
+                <img src="favicon.ico" class="brand-icon-main" alt="Logo">
+                <h1 class="brand-title-main">Fast Insight <span>Explorer</span></h1>
+            </div>
+            
             <div class="search-bar">
-    <i class="fa-solid fa-magnifying-glass"></i>
-    <input type="text" id="globalSearch" placeholder="חפש סרטונים...">
-    <i class="fa-solid fa-microphone" id="voiceSearchBtn" onclick="startVoiceSearch()" title="חיפוש קולי"></i>
-</div>
+                <i class="fa-solid fa-magnifying-glass"></i>
+                <input type="text" id="globalSearch" placeholder="חפש סרטונים...">
+                <i class="fa-solid fa-microphone" id="voiceSearchBtn" onclick="startVoiceSearch()" title="חיפוש קולי"></i>
+            </div>
         </header>
 
         <section id="gallery-container">
@@ -73,6 +72,10 @@
             <div class="video-grid" id="videoGrid"></div>
         </section>
     </main>
+
+    <button class="privacy-handle" onclick="showPrivacy()" title="פרטיות ותנאים">
+        <i class="fa-solid fa-shield-halved"></i>
+    </button>
 
     <div id="floating-player" class="floating-window" style="display: none;">
         <div class="window-header" id="drag-handle">
@@ -129,20 +132,21 @@
             </div>
         </div>
     </div>
+
     <div id="custom-alert-modal" class="modal-overlay">
-    <div class="modal-content" style="text-align: center; padding: 20px;">
-        <div class="modal-header" style="justify-content: center; border-bottom: none;">
-            <h2 id="alert-title"></h2>
-        </div>
-        <div class="modal-body">
-            <p id="alert-message" style="font-size: 16px; margin-bottom: 20px;"></p>
-        </div>
-        <div class="modal-footer" style="background: transparent; display: flex; justify-content: center; gap: 15px;">
-            <button id="alert-action-btn" class="modal-confirm-btn"></button>
-            <button onclick="closeCustomAlert()" class="modal-confirm-btn" style="background: #444; color: white;">אולי אחר כך</button>
+        <div class="modal-content" style="text-align: center; padding: 20px;">
+            <div class="modal-header" style="justify-content: center; border-bottom: none;">
+                <h2 id="alert-title"></h2>
+            </div>
+            <div class="modal-body">
+                <p id="alert-message" style="font-size: 16px; margin-bottom: 20px;"></p>
+            </div>
+            <div class="modal-footer" style="background: transparent; display: flex; justify-content: center; gap: 15px;">
+                <button id="alert-action-btn" class="modal-confirm-btn"></button>
+                <button onclick="closeCustomAlert()" class="modal-confirm-btn" style="background: #444; color: white;">אולי אחר כך</button>
+            </div>
         </div>
     </div>
-</div>
 
     <script src="app.js"></script>
     <script src="https://www.youtube.com/iframe_api"></script>
