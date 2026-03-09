@@ -62,9 +62,10 @@
     <main class="content">
         <header class="top-nav">
             <div class="search-bar">
-                <i class="fa-solid fa-magnifying-glass"></i>
-                <input type="text" id="globalSearch" placeholder="חפש סרטונים...">
-            </div>
+    <i class="fa-solid fa-magnifying-glass"></i>
+    <input type="text" id="globalSearch" placeholder="חפש סרטונים...">
+    <i class="fa-solid fa-microphone" id="voiceSearchBtn" onclick="startVoiceSearch()" title="חיפוש קולי"></i>
+</div>
         </header>
 
         <section id="gallery-container">
@@ -128,6 +129,20 @@
             </div>
         </div>
     </div>
+    <div id="custom-alert-modal" class="modal-overlay">
+    <div class="modal-content" style="text-align: center; padding: 20px;">
+        <div class="modal-header" style="justify-content: center; border-bottom: none;">
+            <h2 id="alert-title"></h2>
+        </div>
+        <div class="modal-body">
+            <p id="alert-message" style="font-size: 16px; margin-bottom: 20px;"></p>
+        </div>
+        <div class="modal-footer" style="background: transparent; display: flex; justify-content: center; gap: 15px;">
+            <button id="alert-action-btn" class="modal-confirm-btn"></button>
+            <button onclick="closeCustomAlert()" class="modal-confirm-btn" style="background: #444; color: white;">אולי אחר כך</button>
+        </div>
+    </div>
+</div>
 
     <script src="app.js"></script>
     <script src="https://www.youtube.com/iframe_api"></script>
