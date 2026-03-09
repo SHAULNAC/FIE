@@ -34,157 +34,128 @@ body {
 ::-webkit-scrollbar-track { background: var(--black); }
 ::-webkit-scrollbar-thumb { background: #333; border-radius: 4px; }
 
-/* --- Sidebar System --- */
-.sidebar-wrapper {
-    width: 70px;
-    flex-shrink: 0;
-    background: var(--dark-grey);
-    border-left: 1px solid var(--border-color);
-    z-index: 1000;
-}
-
+/* --- Sidebar המקצועי החדש --- */
 .sidebar {
     position: fixed;
     top: 0;
     right: 0;
-    width: 70px;
+    width: 70px; /* רוחב מצומצם */
     height: 100vh;
     background: var(--dark-grey);
     border-left: 1px solid var(--border-color);
-    transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    overflow-x: hidden;
-    white-space: nowrap;
+    transition: width 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+    overflow: hidden;
     display: flex;
     flex-direction: column;
-    padding: 20px 0;
     z-index: 1001;
+    padding: 15px 0;
 }
 
 .sidebar:hover {
-    width: 250px;
-    box-shadow: -5px 0 25px rgba(0,0,0,0.6);
+    width: 260px; /* רוחב פתיחה */
+    box-shadow: -10px 0 30px rgba(0,0,0,0.5);
 }
 
-.sidebar .nav-card {
-    background: transparent;
-    border-radius: 0;
-    padding: 0;
-}
-
-.nav-link { 
-    padding: 12px 25px; 
-    cursor: pointer; 
-    color: var(--text-dim); 
-    display: flex; 
-    align-items: center; 
-    gap: 20px; 
-    font-weight: bold; 
-    font-size: 14px; 
-    transition: 0.2s; 
-    border-radius: 8px;
-    margin: 5px 10px;
-}
-
-.nav-link i {
-    font-size: 18px;
-    width: 20px;
-    text-align: center;
-    flex-shrink: 0;
-}
-
-.nav-link:hover, .nav-link.active { 
-    color: white; 
-    background: rgba(255, 255, 255, 0.1);
-}
-
-.nav-text {
-    opacity: 0;
-    transition: opacity 0.2s;
-}
-
-.sidebar:hover .nav-text {
-    opacity: 1;
-    transition-delay: 0.15s;
-}
-
-/* User Profile in Sidebar */
-.user-item {
-    padding: 0 17px;
-    margin-bottom: 20px;
-    border-bottom: 1px solid var(--border-color);
-    padding-bottom: 20px;
+/* יישור כללי לאלמנטים בתוך הסיידבר */
+.nav-link, .user-item {
     display: flex;
     align-items: center;
+    width: 100%;
+    padding: 12px 0; /* פדינג אנכי בלבד, האופקי מנוהל ע"י Flex */
+    text-decoration: none;
+    transition: background 0.2s;
+    cursor: pointer;
+    overflow: hidden;
 }
 
-.profile-avatar {
-    width: 35px;
-    height: 35px;
-    border-radius: 50%;
-    border: 2px solid var(--spotify-green);
+/* האייקון - תמיד נשאר במרכז ה-70px הראשונים */
+.nav-link i, .profile-avatar-container {
+    min-width: 70px; /* זה מבטיח שהאייקון תמיד במרכז ה-70 פיקסלים */
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    font-size: 20px;
     flex-shrink: 0;
-    object-fit: cover;
 }
 
-.user-text-details {
+.nav-link:hover {
+    background: rgba(255, 255, 255, 0.07);
+}
+
+.nav-link.active {
+    color: var(--spotify-green);
+    border-right: 3px solid var(--spotify-green);
+}
+
+/* הטקסט - מופיע בהדרגה */
+.nav-text, .user-info-text {
     opacity: 0;
-    transition: opacity 0.2s;
-    margin-right: 15px;
-}
-
-.sidebar:hover .user-text-details {
-    opacity: 1;
-    transition-delay: 0.15s;
-}
-
-/* Google Login Button */
-.btn-login {
-    background-color: #ffffff;
-    color: #3c4043;
-    border: 1px solid #dadce0;
-    border-radius: 50px;
-    font-size: 14px;
+    white-space: nowrap;
+    transition: opacity 0.3s ease;
     font-weight: 500;
+    margin-right: 5px; /* רווח מהאייקון */
+}
+
+.sidebar:hover .nav-text, 
+.sidebar:hover .user-info-text {
+    opacity: 1;
+}
+
+/* כפתור התחברות - גרסה קומפקטית */
+.login-wrapper {
+    width: 100%;
+    display: flex;
+    justify-content: center;
+    padding: 10px 0;
+}
+
+.btn-login {
+    width: 45px;
+    height: 45px;
+    border-radius: 50%;
+    border: none;
+    background: white;
+    color: black;
     cursor: pointer;
     display: flex;
     justify-content: center;
     align-items: center;
-    gap: 8px;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+    transition: all 0.3s ease;
     overflow: hidden;
-    width: 100%;
-    padding: 10px 16px;
 }
 
-.btn-login:hover {
-    background-color: #f8faff;
-    box-shadow: 0 4px 8px rgba(0,0,0,0.15);
-    border-color: #d2e3fc;
-}
-
-.btn-login::before {
-    content: "\f1a0";
-    font-family: "Font Awesome 6 Brands";
+.btn-login i {
+    font-size: 18px;
     color: #4285F4;
-    font-size: 16px;
-    flex-shrink: 0;
 }
 
-/* Button logic when sidebar is collapsed */
-.sidebar:not(:hover) .btn-login {
+.btn-login span {
+    display: none; /* מוסתר במצב סגור */
+    font-weight: bold;
+    margin-right: 10px;
+    white-space: nowrap;
+}
+
+/* כשהסיידבר פתוח - הכפתור הופך למלבני עם טקסט */
+.sidebar:hover .btn-login {
+    width: 80%;
+    border-radius: 25px;
+    padding: 0 15px;
+    justify-content: flex-start;
+}
+
+.sidebar:hover .btn-login span {
+    display: inline;
+}
+
+/* פרופיל משתמש אחרי התחברות */
+.profile-avatar {
     width: 35px;
     height: 35px;
-    padding: 0;
-    margin: 0;
+    border-radius: 50%;
+    object-fit: cover;
+    border: 2px solid var(--spotify-green);
 }
-.sidebar:not(:hover) .btn-login span {
-    display: none;
-}
-.sidebar:not(:hover) .btn-login::before {
-    margin: 0;
-}
-
 
 /* --- Main Content Area & Header --- */
 .content { 
