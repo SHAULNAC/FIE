@@ -575,10 +575,15 @@ async function preparePlay(encodedData) {
 }
 
 async function fetchSmartRecommendation() {
-    if (!currentUser || !currentPlayingId) return null;
+    // 1. בדיקת בסיס: האם יש משתמש מחובר וסרטון פעיל
+    if (!currentUser || !currentPlayingId) {
+        console.log("Smart Recommendation: No user or no active video.");
+        return null;
+    }
 
     try {
-        // שלב א': שליפת נתוני הסרטון שמנגן עכשיו (בשביל תגיות וקטגוריה)
+        // שלב א': שליפת מטא-דאטה של הסרטון הנוכחי
+        // אנחנו מוודאים ששולפים את ה-tags וה-category_id המדויקים
         const { data: currentVid, error: vidError } = await client
             .from('videos')
             .select('category_id, tags')
@@ -587,21 +592,49 @@ async function fetchSmartRecommendation() {
 
         if (vidError || !currentVid) throw new Error("Could not fetch current video metadata");
 
-        // שלב ב': הפעלת ה-RPC עם הפרמטרים שדרשת
-        const { data: recommendation, error: rpcError } = await client.rpc('get_smart_recommendations', {
+        // שלב ב': הכנת התגיות
+        // מכיוון שה-DB שלך מגדיר 'tags' כ-ARRAY, עלינו להפוך אותו למחרוזת טקסט (String)
+        // כדי שה-RPC יוכל לבצע עליו פעולות טקסטואליות (ts_rank)
+        const tagsArray = currentVid.tags || [];
+        const tagsString = Array.isArray(tagsArray) ? tagsArray.join(' ') : String(tagsArray);
+
+        // שלב ג': קריאה ל-RPC
+        const { data: recommendations, error: rpcError } = await client.rpc('get_smart_recommendations', {
             p_user_id: currentUser.id,
             p_current_video_id: currentPlayingId,
             p_category_id: currentVid.category_id,
-            p_current_tags: currentVid.tags || "", // שליחת התגיות כטקסט
-            p_limit: 1 // אנחנו רוצים רק הצעה אחת מדויקת
+            p_current_tags: tagsString, // שליחה כטקסט נקי
+            p_limit: 1 
         });
 
-        if (rpcError) throw rpcError;
+        if (rpcError) {
+            console.error("RPC Error details:", rpcError);
+            throw rpcError;
+        }
 
-        return (recommendation && recommendation.length > 0) ? recommendation[0] : null;
+        // בדיקה אם חזרה תוצאה
+        if (recommendations && recommendations.length > 0) {
+            const rec = recommendations[0];
+            console.log("Smart Recommendation found:", rec.title);
+            
+            // אנחנו מוודאים שהאובייקט כולל את כל השדות שה-preparePlay צריך
+            return {
+                id: rec.id,
+                title: rec.title,
+                channel_title: rec.channel_title,
+                thumbnail: rec.thumbnail,
+                duration: rec.duration,
+                views_count: rec.views_count,
+                likes_count: rec.likes_count,
+                category_id: rec.category_id
+            };
+        }
+
+        console.log("Smart Recommendation: No suitable videos found.");
+        return null;
 
     } catch (err) {
-        console.error("Smart Recommendation Error:", err.message);
+        console.error("Smart Recommendation System Error:", err.message);
         return null;
     }
 }
