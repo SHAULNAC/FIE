@@ -395,11 +395,11 @@ function renderVideoGrid(videos, isAppend = false) {
 
 async function preparePlay(encodedData) {
     window.autoPlayTriggered = false;
-    clearTimeout(safetyTimer); // איפוס טיימר בטיחות קודם
+    if (typeof safetyTimer !== 'undefined') clearTimeout(safetyTimer); 
     
     try {
         const data = JSON.parse(decodeURIComponent(atob(encodedData)));
-        currentPlayingId = data.id; // עדכון המזהה הנוכחי
+        currentPlayingId = data.id; 
         activeQueue = [...displayResults];
 
         // --- שליחה לגוגל אנליטיקס ---
@@ -434,16 +434,17 @@ async function preparePlay(encodedData) {
             playerBar.classList.add('show-player'); 
         }
 
-        // פונקציית מעבר פנימית
+        // פונקציית מעבר פנימית (Fallback)
         function triggerNext() {
             if (window.autoPlayTriggered) return;
             window.autoPlayTriggered = true;
-            clearTimeout(safetyTimer);
+            if (typeof safetyTimer !== 'undefined') clearTimeout(safetyTimer);
             console.log("מעבר אוטומטי הופעל...");
             playNextInQueue();
         }
 
         const myOrigin = "https://shaulnac.github.io/FIE/";
+        
         // --- יצירת או טעינת הנגן ---
         if (ytPlayer && typeof ytPlayer.loadVideoById === 'function') {
             ytPlayer.loadVideoById(data.id);
@@ -456,7 +457,7 @@ async function preparePlay(encodedData) {
                     'mute': 0,
                     'controls': 1,
                     'origin': myOrigin,
-                    'widget_referrer': myOrigin, // הפניה מלאה כולל התיקייה
+                    'widget_referrer': myOrigin,
                     'enablejsapi': 1,
                     'rel': 0,
                     'showinfo': 0,
@@ -470,11 +471,12 @@ async function preparePlay(encodedData) {
                         if (event.data === YT.PlayerState.PLAYING) {
                             isPlaying = true;
                             updatePlayStatus(true);
+                            if ('mediaSession' in navigator) navigator.mediaSession.playbackState = "playing";
                         } else if (event.data === YT.PlayerState.PAUSED) {
                             isPlaying = false;
                             updatePlayStatus(false);
+                            if ('mediaSession' in navigator) navigator.mediaSession.playbackState = "paused";
                         } else if (event.data === YT.PlayerState.ENDED) {
-                            // הפעלה אוטומטית חכמה
                             console.log("הסרטון הסתיים, מחפש המלצה חכמה...");
                             const nextVid = await fetchSmartRecommendation();
 
@@ -490,7 +492,6 @@ async function preparePlay(encodedData) {
                                 const encoded = btoa(encodeURIComponent(JSON.stringify(videoData)));
                                 preparePlay(encoded);
                             } else {
-                                // Fallback לתור הרגיל אם אין המלצה
                                 triggerNext();
                             }
                         }
@@ -518,6 +519,7 @@ async function preparePlay(encodedData) {
                 if (extra && descElem) descElem.textContent = extra.description || "אין תיאור זמין";
             });
 
+        // --- עדכון היסטוריה ---
         if (currentUser) {
             client.from('history')
                 .upsert(
@@ -534,22 +536,37 @@ async function preparePlay(encodedData) {
                 });
         }
 
-        // --- הוספת תמיכה ב-Media Session (שלט שמע/מקלדת) ---
+        // --- הגדרת Media Session (שלט רחוק ומסך נעילה) ---
         if ('mediaSession' in navigator) {
             navigator.mediaSession.metadata = new MediaMetadata({
                 title: data.t || "ללא כותרת",
                 artist: data.c || "FIE Player",
-                // משיג את התמונה של הסרטון מיוטיוב
+                album: "VideoStation",
                 artwork: [
-                    { src: `https://i.ytimg.com/vi/${data.id}/hqdefault.jpg`, sizes: '480x360', type: 'image/jpeg' }
+                    { src: `https://i.ytimg.com/vi/${data.id}/hqdefault.jpg`, sizes: '480x360', type: 'image/jpeg' },
+                    { src: `https://i.ytimg.com/vi/${data.id}/maxresdefault.jpg`, sizes: '1280x720', type: 'image/jpeg' }
                 ]
             });
 
-            // הגדרת מאזינים לכפתורי השמע של המערכת
-            navigator.mediaSession.setActionHandler('play', togglePlayPause);
-            navigator.mediaSession.setActionHandler('pause', togglePlayPause);
-            navigator.mediaSession.setActionHandler('previoustrack', playPreviousVideo);
-            navigator.mediaSession.setActionHandler('nexttrack', playNextVideo);
+            // פקדים גלובליים
+            navigator.mediaSession.setActionHandler('play', () => {
+                if (ytPlayer && ytPlayer.playVideo) ytPlayer.playVideo();
+            });
+            navigator.mediaSession.setActionHandler('pause', () => {
+                if (ytPlayer && ytPlayer.pauseVideo) ytPlayer.pauseVideo();
+            });
+            
+            // הגדרת כפתורי "הבא" ו"הקודם"
+            navigator.mediaSession.setActionHandler('nexttrack', () => {
+                console.log("MediaSession: Next Track Clicked");
+                playNextVideo(); 
+            });
+            navigator.mediaSession.setActionHandler('previoustrack', () => {
+                console.log("MediaSession: Previous Track Clicked");
+                playPreviousVideo(); 
+            });
+
+            navigator.mediaSession.playbackState = "playing";
         }
 
     } catch (e) {
