@@ -932,6 +932,40 @@ searchInput.addEventListener('keydown', (e) => {
     }
 });
 
+window.playNextVideo = async function() {
+    console.log("מדלג לסרטון הבא (מתעדף המלצה חכמה)...");
+    
+    // 1. נסיון להביא המלצה חכמה (כמו בסיום סרטון)
+    try {
+        const nextVid = await fetchSmartRecommendation();
+
+        if (nextVid) {
+            console.log("נמצאה המלצה חכמה לדילוג:", nextVid.title);
+            const videoData = {
+                id: nextVid.id,
+                t: nextVid.title,
+                c: nextVid.channel_title,
+                cat: categoryMap[nextVid.category_id] || "כללי",
+                v: nextVid.views_count,
+                l: nextVid.likes_count
+            };
+            const encoded = btoa(encodeURIComponent(JSON.stringify(videoData)));
+            preparePlay(encoded);
+            return; // מצאנו המלצה, עוצרים כאן
+        }
+    } catch (err) {
+        console.error("שגיאה בניסיון להביא המלצה חכמה בדילוג:", err);
+    }
+
+    // 2. אם הגענו לכאן, סימן שאין המלצה חכמה - עוברים לתור הרגיל
+    console.log("לא נמצאה המלצה חכמה, עובר לסרטון הבא בתור החיפוש.");
+    playNextInQueue();
+};
+
+window.playPreviousVideo = function() {
+    // חזרה אחורה בדפדפן או לוגיקת היסטוריה מותאמת
+    window.history.back(); 
+};
 // פונקציית עזר לטיפול באנליטיקס כדי למנוע כפילות קוד
 // עדכון בתוך triggerAnalytics:
 function triggerAnalytics(query) {
