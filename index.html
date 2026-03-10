@@ -106,10 +106,18 @@
 
         <div class="player-right">
             <div class="player-controls">
-                <button class="control-btn" onclick="togglePlayPause()" title="הפעל/השהה">
-                    <i id="play-icon" class="fa-solid fa-play"></i>
-                </button>
-            </div>
+    <button class="control-btn" onclick="playPreviousVideo()" title="סרטון קודם">
+        <i class="fa-solid fa-backward-step"></i>
+    </button>
+    
+    <button class="control-btn" onclick="togglePlayPause()" title="הפעל/השהה">
+        <i id="play-icon" class="fa-solid fa-play"></i>
+    </button>
+
+    <button class="control-btn" onclick="playNextVideo()" title="סרטון הבא">
+        <i class="fa-solid fa-forward-step"></i>
+    </button>
+</div>
             <span id="current-category" class="category-tag">כללי</span>
         </div>
     </footer>
