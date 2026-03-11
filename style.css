@@ -311,15 +311,15 @@ body {
 /* --- Video Grid & Cards --- */
 #videoGrid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-    gap: 20px;
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    gap: 15px;
     width: 100%;
     padding-bottom: 90px; 
 }
 
 .v-card {
     background: var(--light-grey); 
-    padding: 12px; border-radius: 12px; 
+    padding: 9px; border-radius: 12px; 
     cursor: pointer;
     display: flex; flex-direction: column; height: 100%; 
     position: relative; 
@@ -399,6 +399,33 @@ body {
     display: flex; align-items: center; padding: 0 25px; z-index: 10000; justify-content: space-between;
     transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.3s, visibility 0.4s;
     backdrop-filter: blur(10px);
+}
+#current-title {
+    font-weight: bold;
+    font-size: 14px;
+    color: white;
+    margin: 0;
+    white-space: normal; /* במקום nowrap */
+    display: -webkit-box;
+    -webkit-line-clamp: 2; /* מקסימום 2 שורות */
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    line-height: 1.2;
+}
+
+/* התאמה לרספונסיביות של כפתורי השליטה */
+@media (max-width: 768px) {
+    .player-center {
+        max-width: 70%;
+        padding: 0 10px;
+    }
+    .control-btn {
+        font-size: 18px;
+        margin-left: 8px;
+    }
+    .now-playing {
+        display: none; /* מסתיר כותרת בנייד כדי לפנות מקום לכפתורים */
+    }
 }
 
 .player-bar.hidden-player { visibility: hidden; transform: translateY(100%); opacity: 0; pointer-events: none; }
