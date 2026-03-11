@@ -260,10 +260,7 @@ async function fetchVideos(query = "", isAppend = false) {
         }
         
     }
-    const statsElem = document.getElementById('search-stats');
-if (fetchedData) {
-    statsElem.textContent = `נמצאו ${fetchedData.length} סרטונים`;
-}
+    
 
     if (fetchedData && fetchedData.length > 0) {
         renderVideoGrid(fetchedData, isAppend);
