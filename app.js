@@ -227,7 +227,10 @@ async function fetchVideos(query = "", isAppend = false) {
     } else if (!hasMoreVideos) {
         return;
     }
-
+const statsElem = document.getElementById('search-stats');
+if (fetchedData) {
+    statsElem.textContent = `נמצאו ${fetchedData.length} סרטונים`;
+}
     isLoadingVideos = true;
     
     const from = loadedVideosCount;
@@ -258,6 +261,7 @@ async function fetchVideos(query = "", isAppend = false) {
                 }
             }, 800);
         }
+        
     }
 
     if (fetchedData && fetchedData.length > 0) {
@@ -354,8 +358,8 @@ function renderVideoGrid(videos, isAppend = false) {
             t: v.title,
             c: v.channel_title,
             cat: categoryMap[v.category_id] || "כללי",
-            v: v.views_count,
-            l: v.likes_count,
+            v: v.views,
+            l: v.likes,
             duration: v.duration // הוספנו כדי שיהיה זמין לנגן
         };
 
