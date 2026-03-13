@@ -15,7 +15,8 @@ let currentSearchQuery = "";
 let currentSearchToken = 0;
 let channelMatchResults = [];
 let pinnedSearchResults = null;
-let isSearchPlaybackPinned = false;
+let playbackMode = 'playlist'; // 'playlist' | 'smart'
+
 let currentChannelFilter = null;
 let userHistoryIds = []; 
 let videoWatchCounts = {};
@@ -26,6 +27,37 @@ let currentAppMode = 'home'; // יכול להיות 'home', 'history', או 'fav
 let ytPlayer = null;
 let currentPlayingId = null;
 let safetyTimer = null;
+let lastPlayedEncodedData = null;
+
+const APP_STATE_STORAGE_KEY = 'fie:last-app-state';
+
+function saveAppState() {
+    try {
+        const searchInput = document.getElementById('globalSearch');
+        const state = {
+            appMode: currentAppMode,
+            searchQuery: searchInput ? searchInput.value : currentSearchQuery,
+            channelFilter: currentChannelFilter,
+            playbackMode,
+            lastPlayedEncodedData,
+            currentPlayingId
+        };
+        localStorage.setItem(APP_STATE_STORAGE_KEY, JSON.stringify(state));
+    } catch (err) {
+        console.warn('לא ניתן לשמור מצב אחרון:', err);
+    }
+}
+
+function loadSavedAppState() {
+    try {
+        const raw = localStorage.getItem(APP_STATE_STORAGE_KEY);
+        if (!raw) return null;
+        return JSON.parse(raw);
+    } catch (err) {
+        console.warn('לא ניתן לקרוא מצב שמור:', err);
+        return null;
+    }
+}
 
 const categoryMap = {
     "1": "סרטים ואנימציה",
@@ -152,6 +184,60 @@ function playPreviousVideo() {
     }
 }
 
+function getQueuePlaybackState() {
+    const queueLength = activeQueue.length;
+    const currentIndex = activeQueue.findIndex(v => v.id === currentPlayingId);
+    return {
+        queueLength,
+        currentIndex,
+        hasPrevious: currentIndex > 0,
+        hasNext: currentIndex >= 0 && currentIndex < queueLength - 1
+    };
+}
+
+function safeSetMediaActionHandler(action, handler) {
+    try {
+        navigator.mediaSession.setActionHandler(action, handler);
+    } catch (err) {
+        console.warn(`MediaSession action not supported: ${action}`, err);
+    }
+}
+
+function updateMediaSessionMetadata(videoData) {
+    if (!('mediaSession' in navigator) || !videoData) return;
+
+    const { queueLength, currentIndex, hasNext, hasPrevious } = getQueuePlaybackState();
+    const inPlaylist = queueLength > 1 && currentIndex >= 0;
+    const albumLabel = inPlaylist
+        ? `VideoStation • Playlist ${currentIndex + 1}/${queueLength}`
+        : 'VideoStation';
+
+    navigator.mediaSession.metadata = new MediaMetadata({
+        title: videoData.t || "ללא כותרת",
+        artist: videoData.c || "FIE Player",
+        album: albumLabel,
+        artwork: [
+            { src: `https://i.ytimg.com/vi/${videoData.id}/hqdefault.jpg`, sizes: '480x360', type: 'image/jpeg' },
+            { src: `https://i.ytimg.com/vi/${videoData.id}/maxresdefault.jpg`, sizes: '1280x720', type: 'image/jpeg' }
+        ]
+    });
+
+    safeSetMediaActionHandler('play', () => {
+        if (ytPlayer && ytPlayer.playVideo) ytPlayer.playVideo();
+    });
+    safeSetMediaActionHandler('pause', () => {
+        if (ytPlayer && ytPlayer.pauseVideo) ytPlayer.pauseVideo();
+    });
+    safeSetMediaActionHandler('nexttrack', hasNext ? () => {
+        console.log("MediaSession: Next Track Clicked");
+        playNextVideo();
+    } : null);
+    safeSetMediaActionHandler('previoustrack', hasPrevious ? () => {
+        console.log("MediaSession: Previous Track Clicked");
+        playPreviousVideo();
+    } : null);
+}
+
 // פונקציית עזר להמרת אובייקט סרטון לקידוד והפעלה
 function playVideoFromObject(vid) {
     const videoData = {
@@ -168,6 +254,8 @@ function playVideoFromObject(vid) {
 
 async function init() {
     try {
+        const savedState = loadSavedAppState();
+
         const { data: { user } } = await client.auth.getUser();
         currentUser = user;
         
@@ -187,9 +275,32 @@ async function init() {
             loadSidebarLists();
         }
 
-        fetchVideos();
+        if (savedState?.playbackMode || typeof savedState?.isSearchPlaybackPinned === 'boolean') {
+            playbackMode = savedState.playbackMode || (savedState.isSearchPlaybackPinned ? 'playlist' : 'smart');
+        }
+
+        if (savedState?.searchQuery) {
+            const searchInput = document.getElementById('globalSearch');
+            if (searchInput) searchInput.value = savedState.searchQuery;
+            currentChannelFilter = savedState.channelFilter || null;
+            fetchVideos(savedState.searchQuery, false, { preserveChannelFilter: Boolean(savedState.channelFilter) });
+        } else {
+            fetchVideos();
+        }
+
+        if (savedState?.appMode === 'history' && currentUser) {
+            displayHistory();
+        } else if (savedState?.appMode === 'favorites' && currentUser) {
+            displayFavorites();
+        }
+
+        if (savedState?.lastPlayedEncodedData) {
+            preparePlay(savedState.lastPlayedEncodedData);
+        }
+
         initDraggable();
         initResizer(); 
+        renderSearchControls();
 
     } catch (error) {
         console.error("Error during init:", error);
@@ -236,6 +347,25 @@ function normalizeSearchTerm(text) {
     return (text || '').replace(/\s+/g, ' ').trim();
 }
 
+function normalizeChannelKey(text) {
+    const normalized = normalizeSearchTerm(text)
+        .toLowerCase()
+        .replace(/[\u0591-\u05C7]/g, '')
+        .replace(/['"`.,!?()-]/g, '')
+        .replace(/ו/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+    return normalized;
+}
+
+function createChannelSearchVariants(text) {
+    const normalized = normalizeSearchTerm(text);
+    const variants = new Set([normalized]);
+    const withoutVav = normalized.replace(/ו/g, '');
+    if (withoutVav) variants.add(withoutVav);
+    return [...variants].filter(Boolean);
+}
+
 function escapeForLike(text) {
     return text.replace(/[\%_]/g, '\\$&');
 }
@@ -245,13 +375,14 @@ async function detectChannelMatches(query) {
     if (!normalized || normalized.length < 2) return [];
 
     try {
-        const escaped = escapeForLike(normalized);
+        const variants = createChannelSearchVariants(normalized).map((v) => escapeForLike(v));
+        const orQuery = variants.map((v) => `channel_title.ilike.%${v}%`).join(',');
 
         const { data, error } = await client
             .from('videos')
             .select('channel_title, thumbnail')
-            .ilike('channel_title', `%${escaped}%`)
-            .limit(200);
+            .or(orQuery)
+            .limit(300);
 
         if (error) {
             console.warn('Channel detection failed:', error.message);
@@ -261,7 +392,7 @@ async function detectChannelMatches(query) {
         const channelsMap = new Map();
         for (const row of (data || [])) {
             if (!row.channel_title) continue;
-            const key = row.channel_title.toLowerCase();
+            const key = normalizeChannelKey(row.channel_title);
             if (!channelsMap.has(key)) {
                 channelsMap.set(key, {
                     name: row.channel_title,
@@ -279,17 +410,25 @@ async function detectChannelMatches(query) {
         if (names.length === 0) return [];
 
         const q = normalized.toLowerCase();
+        const qKey = normalizeChannelKey(normalized);
         const words = q.split(' ').filter(Boolean);
+        const keyWords = qKey.split(' ').filter(Boolean);
 
         const scored = names
             .map((channel) => {
                 const n = channel.name.toLowerCase();
+                const nKey = normalizeChannelKey(channel.name);
                 let score = 0;
                 if (n === q) score += 100;
                 if (n.startsWith(q)) score += 70;
                 if (n.includes(q)) score += 40;
+                if (nKey === qKey) score += 100;
+                if (nKey.startsWith(qKey)) score += 65;
+                if (nKey.includes(qKey)) score += 45;
                 const covered = words.filter((w) => n.includes(w)).length;
+                const coveredKey = keyWords.filter((w) => nKey.includes(w)).length;
                 score += covered * 8;
+                score += coveredKey * 10;
                 score += Math.min(channel.sampleCount, 10);
                 return { ...channel, score };
             })
@@ -305,29 +444,35 @@ async function detectChannelMatches(query) {
     return [];
 }
 
+
 function renderSearchControls() {
     const controls = document.getElementById('search-controls');
     if (!controls) return;
 
-    const pinClass = isSearchPlaybackPinned ? 'active' : '';
-    const pinButton = `
-        <div class="search-controls-top">
-            <button class="search-chip ${pinClass}" onclick="toggleSearchPlaybackPin()" title="השאר את תור ההפעלה של החיפוש הנוכחי">
-                <i class="fa-solid fa-play"></i>
-                <span>${isSearchPlaybackPinned ? 'ניגון חיפוש נעול' : 'נגן תוצאות חיפוש'}</span>
-            </button>
-        </div>
-    `;
+    const playbackIsPlaylist = playbackMode === 'playlist';
+    const modeLabel = playbackIsPlaylist
+        ? 'ניגון תוצאות החיפוש כפלייליסט'
+        : 'הפעלה חכמה מבוססת אלגוריתם';
 
-    const channelCards = channelMatchResults.length > 0
+    const channelsToRender = channelMatchResults.length > 0
+        ? channelMatchResults
+        : (currentChannelFilter
+            ? [{
+                name: currentChannelFilter,
+                thumbnail: '',
+                sampleCount: 0
+            }]
+            : []);
+
+    const channelCards = channelsToRender.length > 0
         ? `
         <div class="channel-cards-row">
-            ${channelMatchResults.map((channel) => {
+            ${channelsToRender.map((channel) => {
                 const safeName = escapeHtml(channel.name);
                 const safeThumb = escapeHtml(channel.thumbnail || '');
                 const countText = channel.sampleCount > 0 ? `${channel.sampleCount} סרטונים לדוגמה` : 'ערוץ תואם';
                 const safeCountText = escapeHtml(countText);
-                const isActive = currentChannelFilter && currentChannelFilter.toLowerCase() === channel.name.toLowerCase();
+                const isActive = currentChannelFilter && normalizeChannelKey(currentChannelFilter) === normalizeChannelKey(channel.name);
                 const activeClass = isActive ? 'active' : '';
                 const encodedName = btoa(encodeURIComponent(channel.name));
 
@@ -347,8 +492,22 @@ function renderSearchControls() {
         `
         : '';
 
-    controls.innerHTML = `${pinButton}${channelCards}`;
+    const modeToggle = `
+        <div class="search-controls-top">
+            <span class="playback-mode-label">${modeLabel}</span>
+            <button class="playback-toggle ${playbackIsPlaylist ? 'playlist' : 'smart'}" onclick="togglePlaybackMode()" title="החלף מצב הפעלה" aria-label="החלף מצב הפעלה">
+                <span class="playback-toggle-track">
+                    <span class="playback-toggle-thumb"></span>
+                </span>
+                <span class="playback-toggle-text-left">פלייליסט</span>
+                <span class="playback-toggle-text-right">חכם</span>
+            </button>
+        </div>
+    `;
+
+    controls.innerHTML = `${channelCards}${modeToggle}`;
 }
+
 
 
 async function fetchVideos(query = "", isAppend = false, options = {}) {
@@ -377,6 +536,7 @@ async function fetchVideos(query = "", isAppend = false, options = {}) {
     let fetchedData = null;
 
     if (currentChannelFilter) {
+        // חיפוש ממוקד ערוץ
         const { data } = await client.from('videos')
             .select('id, title, channel_title, thumbnail, duration, views, likes, category_id')
             .ilike('channel_title', currentChannelFilter)
@@ -384,18 +544,21 @@ async function fetchVideos(query = "", isAppend = false, options = {}) {
             .range(from, to);
         fetchedData = data || [];
     } else if (!currentSearchQuery) {
+        // דף הבית - סרטונים אחרונים
         const { data } = await client.from('videos')
             .select('id, title, channel_title, thumbnail, duration, views, likes, category_id')
             .order('published_at', { ascending: false })
             .range(from, to);
         fetchedData = data;
     } else {
+        // חיפוש טקסט חופשי
         const cleanQuery = currentSearchQuery.replace(/[^\w\sא-ת]/g, ' ').trim();
         const { data } = await client.rpc('search_videos_prioritized', { search_term: cleanQuery })
             .range(from, to);
         fetchedData = data || [];
 
         if (!isAppend) {
+            // זיהוי ערוצים ראשוני לפי השאילתה המקורית
             channelMatchResults = await detectChannelMatches(cleanQuery);
 
             clearTimeout(debounceTimeout);
@@ -404,17 +567,34 @@ async function fetchVideos(query = "", isAppend = false, options = {}) {
 
                 const translated = await getTranslationWithDB(cleanQuery);
                 if (translated && translated.toLowerCase() !== cleanQuery.toLowerCase()) {
-                    const { data: transData } = await client.rpc('search_videos_prioritized', { search_term: translated }).range(0, VIDEOS_PER_PAGE - 1);
+                    
+                    // --- תוספת: חיפוש ערוצים גם לפי התרגום ---
+                    const translatedChannels = await detectChannelMatches(translated);
+                    
+                    // מיזוג תוצאות
+                    const existingNames = new Set(channelMatchResults.map(c => normalizeChannelKey(c.name)));
+                    translatedChannels.forEach(tc => {
+                        if (!existingNames.has(normalizeChannelKey(tc.name))) {
+                            channelMatchResults.push(tc);
+                        }
+                    });
+                    
+                    channelMatchResults = channelMatchResults.slice(0, 12);
+                    renderSearchControls();
+
+                    // חיפוש סרטונים לפי התרגום
+                    const { data: transData } = await client.rpc('search_videos_prioritized', { search_term: translated })
+                        .range(0, VIDEOS_PER_PAGE - 1);
+                    
                     if (searchToken !== currentSearchToken || currentChannelFilter) return;
+                    
                     if (transData && transData.length > 0) {
                         renderVideoGrid(transData, true); 
                     }
                 }
             }, 800);
         }
-        
     }
-    
 
     if (searchToken !== currentSearchToken) {
         isLoadingVideos = false;
@@ -425,29 +605,36 @@ async function fetchVideos(query = "", isAppend = false, options = {}) {
 
     if (fetchedData && fetchedData.length > 0) {
         renderVideoGrid(fetchedData, isAppend);
+        if (playbackMode === 'playlist' && !isAppend) pinnedSearchResults = [...displayResults];
         loadedVideosCount += fetchedData.length;
         
         if (fetchedData.length < VIDEOS_PER_PAGE) {
             hasMoreVideos = false;
         }
     } else {
-        if (!isAppend) renderVideoGrid([]);
+        if (!isAppend) {
+            renderVideoGrid([]);
+            if (playbackMode === 'playlist') pinnedSearchResults = [];
+        }
         hasMoreVideos = false;
     }
 
     isLoadingVideos = false;
-}
+    saveAppState();
 
-// הגדרות טבלת התרגומים (שנה אותן לפי מה שהגדרת ב-Supabase)
-const TRANSLATION_TABLE = 'translation_cache'; // שם הטבלה
-const COL_ORIGINAL = 'original_text';             // עמודת מונח המקור (עברית)
-const COL_TRANSLATED = 'translated_text';          // עמודת התרגום (אנגלית)
+    if (currentPlayingId) {
+        updateMediaSessionMetadata({ 
+            id: currentPlayingId, 
+            t: document.getElementById('current-title')?.textContent, 
+            c: document.getElementById('current-channel')?.textContent 
+        });
+    }
+}
 
 async function getTranslationWithDB(text) {
     if (!text) return null;
     
     try {
-        // 1. בדיקה אם המונח כבר קיים במסד הנתונים
         const { data: existingTranslation, error: fetchError } = await client
             .from(TRANSLATION_TABLE)
             .select(COL_TRANSLATED)
@@ -458,23 +645,17 @@ async function getTranslationWithDB(text) {
             return existingTranslation[COL_TRANSLATED];
         }
 
-        // 2. פנייה לגוגל עם בקשה לתרגום (dt=t) ותעתיק (dt=rm)
         const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=iw&tl=en&dt=t&dt=rm&q=${encodeURI(text)}`;
         const res = await fetch(url);
         const data = await res.json();
 
-        // חילוץ התרגום המילולי (למשל: Good day)
         const translation = data[0][0][0];
         
-        // חילוץ התעתיק הפונטי (למשל: yom tov)
-        // בדרך כלל המידע נמצא במיקום הזה במערך של גוגל
         let transliteration = "";
         if (data[0][1] && (data[0][1][3] || data[0][1][2])) {
             transliteration = data[0][1][3] || data[0][1][2];
         }
 
-        // 3. שילוב של שניהם למחרוזת אחת שתשמר ב-DB
-        // אנחנו שומרים "Good day yom tov" כדי שהחיפוש ימצא את שניהם
         const combinedResult = transliteration 
             ? `${translation} ${transliteration}` 
             : translation;
@@ -494,7 +675,6 @@ async function getTranslationWithDB(text) {
         return null;
     }
 }
-
 // --- רינדור ---
 
 function renderVideoGrid(videos, isAppend = false) {
@@ -562,8 +742,10 @@ async function preparePlay(encodedData) {
     
     try {
         const data = JSON.parse(decodeURIComponent(atob(encodedData)));
+        lastPlayedEncodedData = encodedData;
         currentPlayingId = data.id; 
-        activeQueue = isSearchPlaybackPinned && pinnedSearchResults ? [...pinnedSearchResults] : [...displayResults];
+        activeQueue = playbackMode === 'playlist' && pinnedSearchResults ? [...pinnedSearchResults] : [...displayResults];
+        saveAppState();
 
         // --- שליחה לגוגל אנליטיקס ---
         if (typeof gtag === 'function') {
@@ -701,34 +883,7 @@ async function preparePlay(encodedData) {
 
         // --- הגדרת Media Session (שלט רחוק ומסך נעילה) ---
         if ('mediaSession' in navigator) {
-            navigator.mediaSession.metadata = new MediaMetadata({
-                title: data.t || "ללא כותרת",
-                artist: data.c || "FIE Player",
-                album: "VideoStation",
-                artwork: [
-                    { src: `https://i.ytimg.com/vi/${data.id}/hqdefault.jpg`, sizes: '480x360', type: 'image/jpeg' },
-                    { src: `https://i.ytimg.com/vi/${data.id}/maxresdefault.jpg`, sizes: '1280x720', type: 'image/jpeg' }
-                ]
-            });
-
-            // פקדים גלובליים
-            navigator.mediaSession.setActionHandler('play', () => {
-                if (ytPlayer && ytPlayer.playVideo) ytPlayer.playVideo();
-            });
-            navigator.mediaSession.setActionHandler('pause', () => {
-                if (ytPlayer && ytPlayer.pauseVideo) ytPlayer.pauseVideo();
-            });
-            
-            // הגדרת כפתורי "הבא" ו"הקודם"
-            navigator.mediaSession.setActionHandler('nexttrack', () => {
-                console.log("MediaSession: Next Track Clicked");
-                playNextVideo(); 
-            });
-            navigator.mediaSession.setActionHandler('previoustrack', () => {
-                console.log("MediaSession: Previous Track Clicked");
-                playPreviousVideo(); 
-            });
-
+            updateMediaSessionMetadata(data);
             navigator.mediaSession.playbackState = "playing";
         }
 
@@ -738,7 +893,7 @@ async function preparePlay(encodedData) {
 }
 
 async function fetchSmartRecommendation() {
-    if (isSearchPlaybackPinned) {
+    if (playbackMode === 'playlist') {
         return null;
     }
 
@@ -753,7 +908,7 @@ async function fetchSmartRecommendation() {
         // אנחנו מוודאים ששולפים את ה-tags וה-category_id המדויקים
         const { data: currentVid, error: vidError } = await client
             .from('videos')
-            .select('category_id, tags')
+            .select('category_id, tags, channel_title')
             .eq('id', currentPlayingId)
             .single();
 
@@ -767,12 +922,13 @@ async function fetchSmartRecommendation() {
 
         // שלב ג': קריאה ל-RPC
         const { data: recommendations, error: rpcError } = await client.rpc('get_smart_recommendations', {
-            p_user_id: currentUser.id,
-            p_current_video_id: currentPlayingId,
-            p_category_id: currentVid.category_id,
-            p_current_tags: tagsString, // שליחה כטקסט נקי
-            p_limit: 1 
-        });
+    p_user_id: currentUser.id,
+    p_current_video_id: currentPlayingId,
+    p_category_id: currentVid.category_id,
+    p_current_tags: tagsString, 
+    p_channel_title: currentVid.channel_title, // הוספת פסיק כאן
+    p_limit: 1 
+});
 
         if (rpcError) {
             console.error("RPC Error details:", rpcError);
@@ -1053,6 +1209,7 @@ function goHome() {
     // כשאנחנו קוראים לה ככה, היא כבר מאפסת את המשתנים (loadedVideosCount, hasMoreVideos)
     // בזכות בלוק ה- if (!isAppend) שכבר קיים אצלך בקוד!
     fetchVideos("");
+    saveAppState();
 }
 
 async function displayHistory() {
@@ -1062,6 +1219,7 @@ async function displayHistory() {
     const title = document.getElementById('main-title');
     if (title) title.textContent = "היסטוריית צפייה";
     if (data) renderVideoGrid(data.map(i => i.videos).filter(v => v));
+    saveAppState();
 }
 
 async function displayFavorites() {
@@ -1071,6 +1229,7 @@ async function displayFavorites() {
     const title = document.getElementById('main-title');
     if (title) title.textContent = "מועדפים";
     if (data) renderVideoGrid(data.map(i => i.videos).filter(v => v));
+    saveAppState();
 }
 
 function showPrivacy() {
@@ -1151,6 +1310,10 @@ async function applyChannelFilter(channelName) {
     currentSearchQuery = normalizedChannelName;
     currentAppMode = 'home';
 
+    if (!channelMatchResults.some(c => normalizeChannelKey(c.name) === normalizeChannelKey(normalizedChannelName))) {
+        channelMatchResults = [{ name: normalizedChannelName, thumbnail: '', sampleCount: 0 }];
+    }
+
     await fetchVideos(normalizedChannelName, false, { preserveChannelFilter: true });
 }
 
@@ -1164,15 +1327,18 @@ function applyChannelFilterByName(encodedChannelName) {
     }
 }
 
-function toggleSearchPlaybackPin() {
-    isSearchPlaybackPinned = !isSearchPlaybackPinned;
-    pinnedSearchResults = isSearchPlaybackPinned ? [...displayResults] : null;
+function togglePlaybackMode() {
+    playbackMode = playbackMode === 'playlist' ? 'smart' : 'playlist';
+    pinnedSearchResults = playbackMode === 'playlist' ? [...displayResults] : null;
     renderSearchControls();
+    saveAppState();
+
+    if (currentPlayingId) updateMediaSessionMetadata({ id: currentPlayingId, t: document.getElementById('current-title')?.textContent, c: document.getElementById('current-channel')?.textContent });
 }
 
 window.applyChannelFilter = applyChannelFilter;
 window.applyChannelFilterByName = applyChannelFilterByName;
-window.toggleSearchPlaybackPin = toggleSearchPlaybackPin;
+window.togglePlaybackMode = togglePlaybackMode;
 
 window.playNextVideo = async function() {
     console.log("מדלג לסרטון הבא (מתעדף המלצה חכמה)...");
@@ -1205,8 +1371,7 @@ window.playNextVideo = async function() {
 };
 
 window.playPreviousVideo = function() {
-    // חזרה אחורה בדפדפן או לוגיקת היסטוריה מותאמת
-    window.history.back(); 
+    playPreviousVideo();
 };
 // פונקציית עזר לטיפול באנליטיקס כדי למנוע כפילות קוד
 // עדכון בתוך triggerAnalytics:
