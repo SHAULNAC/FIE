@@ -28,6 +28,9 @@ let ytPlayer = null;
 let currentPlayingId = null;
 let safetyTimer = null;
 let lastPlayedEncodedData = null;
+const TRANSLATION_TABLE = 'translation_cache'; // שם הטבלה ב-Supabase
+const COL_ORIGINAL = 'original_text';     // שם העמודה של הטקסט המקורי
+const COL_TRANSLATED = 'translated_text'; // שם העמודה של הטקסט המתורגם
 
 const APP_STATE_STORAGE_KEY = 'fie:last-app-state';
 
@@ -363,7 +366,26 @@ function createChannelSearchVariants(text) {
     const variants = new Set([normalized]);
     const withoutVav = normalized.replace(/ו/g, '');
     if (withoutVav) variants.add(withoutVav);
+    const latinOnly = normalized.match(/[A-Za-z0-9 ]+/g)?.join(' ').trim();
+    if (latinOnly) variants.add(latinOnly);
     return [...variants].filter(Boolean);
+}
+
+function createTranslatedSearchVariants(text) {
+    const normalized = normalizeSearchTerm(text);
+    if (!normalized) return [];
+    const chunks = normalized
+        .split(/[|,/]/)
+        .map((part) => part.trim())
+        .filter(Boolean);
+
+    const expanded = new Set();
+    chunks.forEach((chunk) => {
+        createChannelSearchVariants(chunk).forEach((variant) => expanded.add(variant));
+    });
+
+    createChannelSearchVariants(normalized).forEach((variant) => expanded.add(variant));
+    return [...expanded].filter(Boolean);
 }
 
 function escapeForLike(text) {
@@ -375,7 +397,16 @@ async function detectChannelMatches(query) {
     if (!normalized || normalized.length < 2) return [];
 
     try {
-        const variants = createChannelSearchVariants(normalized).map((v) => escapeForLike(v));
+        const translated = await getTranslationWithDB(normalized);
+
+        const allVariants = new Set(createTranslatedSearchVariants(normalized));
+        if (translated && translated.toLowerCase() !== normalized.toLowerCase()) {
+            createTranslatedSearchVariants(translated).forEach((variant) => allVariants.add(variant));
+        }
+
+        const variants = [...allVariants].map((v) => escapeForLike(v)).filter(Boolean);
+        if (variants.length === 0) return [];
+
         const orQuery = variants.map((v) => `channel_title.ilike.%${v}%`).join(',');
 
         const { data, error } = await client
@@ -409,26 +440,36 @@ async function detectChannelMatches(query) {
         const names = [...channelsMap.values()];
         if (names.length === 0) return [];
 
-        const q = normalized.toLowerCase();
-        const qKey = normalizeChannelKey(normalized);
-        const words = q.split(' ').filter(Boolean);
-        const keyWords = qKey.split(' ').filter(Boolean);
+        const rankingQueries = [normalized];
+        if (translated && translated.toLowerCase() !== normalized.toLowerCase()) {
+            rankingQueries.push(translated);
+        }
 
         const scored = names
             .map((channel) => {
                 const n = channel.name.toLowerCase();
                 const nKey = normalizeChannelKey(channel.name);
                 let score = 0;
-                if (n === q) score += 100;
-                if (n.startsWith(q)) score += 70;
-                if (n.includes(q)) score += 40;
-                if (nKey === qKey) score += 100;
-                if (nKey.startsWith(qKey)) score += 65;
-                if (nKey.includes(qKey)) score += 45;
-                const covered = words.filter((w) => n.includes(w)).length;
-                const coveredKey = keyWords.filter((w) => nKey.includes(w)).length;
-                score += covered * 8;
-                score += coveredKey * 10;
+
+                rankingQueries.forEach((rq) => {
+                    const q = rq.toLowerCase();
+                    const qKey = normalizeChannelKey(rq);
+                    const words = q.split(' ').filter(Boolean);
+                    const keyWords = qKey.split(' ').filter(Boolean);
+
+                    if (n === q) score += 100;
+                    if (n.startsWith(q)) score += 70;
+                    if (n.includes(q)) score += 40;
+                    if (nKey === qKey) score += 100;
+                    if (nKey.startsWith(qKey)) score += 65;
+                    if (nKey.includes(qKey)) score += 45;
+
+                    const covered = words.filter((w) => n.includes(w)).length;
+                    const coveredKey = keyWords.filter((w) => nKey.includes(w)).length;
+                    score += covered * 8;
+                    score += coveredKey * 10;
+                });
+
                 score += Math.min(channel.sampleCount, 10);
                 return { ...channel, score };
             })
@@ -443,6 +484,7 @@ async function detectChannelMatches(query) {
 
     return [];
 }
+
 
 
 function renderSearchControls() {
@@ -478,12 +520,16 @@ function renderSearchControls() {
 
                 return `
                     <button class="channel-card ${activeClass}" onclick="applyChannelFilterByName('${encodedName}')" title="הצג תוצאות מהערוץ בלבד">
-                        <div class="channel-card-thumb">
+                        <div class="channel-card-thumb v-thumb">
                             ${safeThumb ? `<img src="${safeThumb}" alt="${safeName}" loading="lazy">` : '<div class="channel-card-fallback"><i class="fa-solid fa-tv"></i></div>'}
                         </div>
-                        <div class="channel-card-info">
+                        <div class="channel-card-info v-info">
                             <h3>${safeName}</h3>
                             <p>${safeCountText}</p>
+                        </div>
+                        <div class="channel-card-footer card-footer">
+                            <span><i class="fa-solid fa-tv"></i> ערוץ</span>
+                            <span>סנן תוצאות</span>
                         </div>
                     </button>
                 `;
@@ -492,16 +538,23 @@ function renderSearchControls() {
         `
         : '';
 
+    const modeHelpText = playbackIsPlaylist
+        ? 'מצב פלייליסט: מנגן ברצף את תוצאות החיפוש הנוכחיות'
+        : 'מצב חכם: בוחר עבורך סרטון מומלץ אוטומטית בסיום הניגון';
+
     const modeToggle = `
         <div class="search-controls-top">
             <span class="playback-mode-label">${modeLabel}</span>
-            <button class="playback-toggle ${playbackIsPlaylist ? 'playlist' : 'smart'}" onclick="togglePlaybackMode()" title="החלף מצב הפעלה" aria-label="החלף מצב הפעלה">
-                <span class="playback-toggle-track">
-                    <span class="playback-toggle-thumb"></span>
-                </span>
-                <span class="playback-toggle-text-left">פלייליסט</span>
-                <span class="playback-toggle-text-right">חכם</span>
-            </button>
+            <div class="playback-toggle-wrap ${playbackIsPlaylist ? 'mode-playlist' : 'mode-smart'}">
+                <span class="playback-toggle-icon playback-toggle-icon-left" aria-hidden="true"><i class="fa-solid fa-list-ul"></i></span>
+                <button class="playback-toggle ${playbackIsPlaylist ? 'playlist' : 'smart'}" onclick="togglePlaybackMode()" title="${modeHelpText}" aria-label="${modeHelpText}">
+                    <span class="playback-toggle-track">
+                        <span class="playback-toggle-thumb"></span>
+                    </span>
+                </button>
+                <span class="playback-toggle-icon playback-toggle-icon-right" aria-hidden="true"><i class="fa-solid fa-wand-magic-sparkles"></i></span>
+                <span class="playback-toggle-hint">${modeHelpText}</span>
+            </div>
         </div>
     `;
 
@@ -567,29 +620,14 @@ async function fetchVideos(query = "", isAppend = false, options = {}) {
 
                 const translated = await getTranslationWithDB(cleanQuery);
                 if (translated && translated.toLowerCase() !== cleanQuery.toLowerCase()) {
-                    
-                    // --- תוספת: חיפוש ערוצים גם לפי התרגום ---
-                    const translatedChannels = await detectChannelMatches(translated);
-                    
-                    // מיזוג תוצאות
-                    const existingNames = new Set(channelMatchResults.map(c => normalizeChannelKey(c.name)));
-                    translatedChannels.forEach(tc => {
-                        if (!existingNames.has(normalizeChannelKey(tc.name))) {
-                            channelMatchResults.push(tc);
-                        }
-                    });
-                    
-                    channelMatchResults = channelMatchResults.slice(0, 12);
-                    renderSearchControls();
-
                     // חיפוש סרטונים לפי התרגום
                     const { data: transData } = await client.rpc('search_videos_prioritized', { search_term: translated })
                         .range(0, VIDEOS_PER_PAGE - 1);
-                    
+
                     if (searchToken !== currentSearchToken || currentChannelFilter) return;
-                    
+
                     if (transData && transData.length > 0) {
-                        renderVideoGrid(transData, true); 
+                        renderVideoGrid(transData, true);
                     }
                 }
             }, 800);
