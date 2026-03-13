@@ -497,15 +497,20 @@ body {
     font-weight: 600;
 }
 
-.playback-toggle {
-    border: 1px solid var(--border-color);
-    background: rgba(24, 24, 24, 0.95);
-    color: var(--text-white);
-    border-radius: 999px;
-    padding: 8px 10px;
+.playback-toggle-wrap {
+    position: relative;
     display: inline-flex;
     align-items: center;
     gap: 10px;
+}
+
+.playback-toggle {
+    border: 1px solid var(--border-color);
+    background: rgba(28, 39, 42, 0.9);
+    border-radius: 999px;
+    padding: 4px;
+    display: inline-flex;
+    align-items: center;
     cursor: pointer;
     transition: border-color 0.2s ease, transform 0.2s ease;
 }
@@ -518,7 +523,7 @@ body {
 .playback-toggle-track {
     width: 46px;
     height: 24px;
-    background: #3a3a3a;
+    background: rgba(100, 122, 128, 0.35);
     border-radius: 999px;
     position: relative;
     display: inline-flex;
@@ -531,14 +536,14 @@ body {
     width: 20px;
     height: 20px;
     border-radius: 50%;
-    background: #fff;
+    background: #dff8fb;
     position: absolute;
     right: 2px;
     transition: transform 0.2s ease;
 }
 
 .playback-toggle.smart .playback-toggle-track {
-    background: rgba(24, 124, 134, 0.4);
+    background: rgba(24, 124, 134, 0.65);
 }
 
 .playback-toggle.smart .playback-toggle-thumb {
@@ -546,16 +551,37 @@ body {
     background: var(--spotify-green);
 }
 
-.playback-toggle-text-left,
-.playback-toggle-text-right {
-    font-size: 12px;
+.playback-toggle-icon {
     color: var(--text-dim);
+    font-size: 14px;
+    transition: color 0.2s ease;
 }
 
-.playback-toggle.playlist .playback-toggle-text-left,
-.playback-toggle.smart .playback-toggle-text-right {
+.playback-toggle-wrap.mode-playlist .playback-toggle-icon-left,
+.playback-toggle-wrap.mode-smart .playback-toggle-icon-right {
     color: var(--text-white);
-    font-weight: 600;
+}
+
+.playback-toggle-hint {
+    position: absolute;
+    bottom: calc(100% + 8px);
+    right: 0;
+    background: rgba(17, 22, 24, 0.95);
+    border: 1px solid rgba(124, 171, 178, 0.4);
+    border-radius: 8px;
+    padding: 6px 10px;
+    font-size: 12px;
+    color: var(--text-dim);
+    white-space: nowrap;
+    opacity: 0;
+    pointer-events: none;
+    transform: translateY(4px);
+    transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.playback-toggle-wrap:hover .playback-toggle-hint {
+    opacity: 1;
+    transform: translateY(0);
 }
 
 .search-chip {
@@ -599,34 +625,39 @@ body {
 
 .channel-card {
     background: var(--light-grey);
-    border: 1px solid #2f3a3f;
+    border: 1px solid transparent;
     border-radius: 12px;
-    padding: 10px;
+    padding: 9px;
     cursor: pointer;
     display: flex;
-    align-items: center;
-    gap: 12px;
-    min-width: 300px;
+    flex-direction: column;
+    height: 100%;
+    align-items: stretch;
+    gap: 0;
+    min-width: 160px;
+    max-width: 160px;
     text-align: right;
     color: var(--text-white);
-    transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+    transition: transform 0.2s ease, box-shadow 0.2s ease, background 0.3s ease;
 }
 
 .channel-card:hover {
-    background: #222a2d;
-    border-color: var(--spotify-green);
-    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.32);
+    background: #282828;
+    transform: translateY(-5px);
+    box-shadow: 0 10px 20px rgba(0,0,0,0.5);
+    border-color: #333;
 }
 
 .channel-card.active {
-    background: #1f2f31;
+    background: rgba(24, 124, 134, 0.22);
     border-color: var(--spotify-green);
     box-shadow: 0 0 0 1px rgba(24, 124, 134, 0.55);
 }
 
 .channel-card-thumb {
-    width: 128px;
-    height: 72px;
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    height: auto;
     border-radius: 8px;
     overflow: hidden;
     background: rgba(0, 0, 0, 0.45);
@@ -649,17 +680,24 @@ body {
 }
 
 .channel-card-info h3 {
-    margin: 0;
-    font-size: 15px;
-    line-height: 1.25;
-    max-width: 145px;
-    white-space: nowrap;
+    margin: 10px 0 5px 0;
+    font-size: 13px;
+    line-height: 1.3;
+    max-width: 100%;
+    white-space: normal;
     overflow: hidden;
-    text-overflow: ellipsis;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
 }
 
 .channel-card-info p {
-    margin: 6px 0 0;
+    margin: 0;
     font-size: 12px;
     color: var(--text-dim);
+}
+
+.channel-card-footer {
+    margin-top: auto;
+    padding-top: 10px;
 }
