@@ -28,6 +28,9 @@ let ytPlayer = null;
 let currentPlayingId = null;
 let safetyTimer = null;
 let lastPlayedEncodedData = null;
+const TRANSLATION_TABLE = 'translation_cache'; // שם הטבלה ב-Supabase
+const COL_ORIGINAL = 'original_text';     // שם העמודה של הטקסט המקורי
+const COL_TRANSLATED = 'translated_text'; // שם העמודה של הטקסט המתורגם
 
 const APP_STATE_STORAGE_KEY = 'fie:last-app-state';
 
