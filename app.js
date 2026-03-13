@@ -5,13 +5,13 @@ const client = supabase.createClient(SB_URL, SB_KEY);
 let currentUser = null;
 let analyticsTimeout = null; 
 let userFavorites = [];
-let debounceTimeout = null;
 let isPlaying = false;
 let loadedVideosCount = 0;
 const VIDEOS_PER_PAGE = 50; 
 let isLoadingVideos = false;
 let hasMoreVideos = true;
 let currentSearchQuery = ""; 
+let currentResolvedSearchQuery = "";
 let currentSearchToken = 0;
 let channelMatchResults = [];
 let pinnedSearchResults = null;
@@ -361,35 +361,17 @@ function normalizeChannelKey(text) {
     return normalized;
 }
 
-function createChannelSearchVariants(text) {
-    const normalized = normalizeSearchTerm(text);
-    const variants = new Set([normalized]);
-    const withoutVav = normalized.replace(/ו/g, '');
-    if (withoutVav) variants.add(withoutVav);
-    const latinOnly = normalized.match(/[A-Za-z0-9 ]+/g)?.join(' ').trim();
-    if (latinOnly) variants.add(latinOnly);
-    return [...variants].filter(Boolean);
+function sanitizeChannelSearchTerm(text) {
+    return normalizeSearchTerm(text)
+        .replace(/[^\w\sא-ת]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
 }
 
-function createTranslatedSearchVariants(text) {
-    const normalized = normalizeSearchTerm(text);
-    if (!normalized) return [];
-    const chunks = normalized
-        .split(/[|,/]/)
-        .map((part) => part.trim())
-        .filter(Boolean);
-
-    const expanded = new Set();
-    chunks.forEach((chunk) => {
-        createChannelSearchVariants(chunk).forEach((variant) => expanded.add(variant));
-    });
-
-    createChannelSearchVariants(normalized).forEach((variant) => expanded.add(variant));
-    return [...expanded].filter(Boolean);
-}
-
-function escapeForLike(text) {
-    return text.replace(/[\%_]/g, '\\$&');
+function buildChannelIlikePattern(text) {
+    const clean = sanitizeChannelSearchTerm(text);
+    if (!clean) return null;
+    return `%${clean.replace(/\s+/g, '%')}%`;
 }
 
 async function detectChannelMatches(query) {
@@ -398,21 +380,14 @@ async function detectChannelMatches(query) {
 
     try {
         const translated = await getTranslationWithDB(normalized);
-
-        const allVariants = new Set(createTranslatedSearchVariants(normalized));
-        if (translated && translated.toLowerCase() !== normalized.toLowerCase()) {
-            createTranslatedSearchVariants(translated).forEach((variant) => allVariants.add(variant));
-        }
-
-        const variants = [...allVariants].map((v) => escapeForLike(v)).filter(Boolean);
-        if (variants.length === 0) return [];
-
-        const orQuery = variants.map((v) => `channel_title.ilike.%${v}%`).join(',');
+        const resolvedQuery = sanitizeChannelSearchTerm(translated && translated.trim() ? translated : normalized);
+        const ilikePattern = buildChannelIlikePattern(resolvedQuery);
+        if (!ilikePattern) return [];
 
         const { data, error } = await client
             .from('videos')
             .select('channel_title, thumbnail')
-            .or(orQuery)
+            .ilike('channel_title', ilikePattern)
             .limit(300);
 
         if (error) {
@@ -440,35 +415,28 @@ async function detectChannelMatches(query) {
         const names = [...channelsMap.values()];
         if (names.length === 0) return [];
 
-        const rankingQueries = [normalized];
-        if (translated && translated.toLowerCase() !== normalized.toLowerCase()) {
-            rankingQueries.push(translated);
-        }
+        const rankingQuery = resolvedQuery.toLowerCase();
+        const rankingQueryKey = normalizeChannelKey(resolvedQuery);
 
         const scored = names
             .map((channel) => {
                 const n = channel.name.toLowerCase();
                 const nKey = normalizeChannelKey(channel.name);
+                const words = rankingQuery.split(' ').filter(Boolean);
+                const keyWords = rankingQueryKey.split(' ').filter(Boolean);
                 let score = 0;
 
-                rankingQueries.forEach((rq) => {
-                    const q = rq.toLowerCase();
-                    const qKey = normalizeChannelKey(rq);
-                    const words = q.split(' ').filter(Boolean);
-                    const keyWords = qKey.split(' ').filter(Boolean);
+                if (n === rankingQuery) score += 100;
+                if (n.startsWith(rankingQuery)) score += 70;
+                if (n.includes(rankingQuery)) score += 40;
+                if (nKey === rankingQueryKey) score += 100;
+                if (nKey.startsWith(rankingQueryKey)) score += 65;
+                if (nKey.includes(rankingQueryKey)) score += 45;
 
-                    if (n === q) score += 100;
-                    if (n.startsWith(q)) score += 70;
-                    if (n.includes(q)) score += 40;
-                    if (nKey === qKey) score += 100;
-                    if (nKey.startsWith(qKey)) score += 65;
-                    if (nKey.includes(qKey)) score += 45;
-
-                    const covered = words.filter((w) => n.includes(w)).length;
-                    const coveredKey = keyWords.filter((w) => nKey.includes(w)).length;
-                    score += covered * 8;
-                    score += coveredKey * 10;
-                });
+                const covered = words.filter((w) => n.includes(w)).length;
+                const coveredKey = keyWords.filter((w) => nKey.includes(w)).length;
+                score += covered * 8;
+                score += coveredKey * 10;
 
                 score += Math.min(channel.sampleCount, 10);
                 return { ...channel, score };
@@ -571,6 +539,7 @@ async function fetchVideos(query = "", isAppend = false, options = {}) {
 
     if (!isAppend) {
         currentSearchQuery = normalizeSearchTerm(query);
+        currentResolvedSearchQuery = "";
         loadedVideosCount = 0;
         hasMoreVideos = true;
         if (!preserveChannelFilter) {
@@ -606,31 +575,30 @@ async function fetchVideos(query = "", isAppend = false, options = {}) {
     } else {
         // חיפוש טקסט חופשי
         const cleanQuery = currentSearchQuery.replace(/[^\w\sא-ת]/g, ' ').trim();
-        const { data } = await client.rpc('search_videos_prioritized', { search_term: cleanQuery })
+
+        if (!cleanQuery) {
+            fetchedData = [];
+        } else {
+            if (!isAppend || !currentResolvedSearchQuery) {
+                const translated = await getTranslationWithDB(cleanQuery);
+                currentResolvedSearchQuery = translated && translated.trim()
+                    ? translated.trim()
+                    : cleanQuery;
+            }
+
+            if (searchToken !== currentSearchToken || currentChannelFilter) {
+                isLoadingVideos = false;
+                return;
+            }
+
+            const { data } = await client.rpc('search_videos_prioritized', { search_term: currentResolvedSearchQuery })
             .range(from, to);
-        fetchedData = data || [];
+            fetchedData = data || [];
+        }
 
         if (!isAppend) {
             // זיהוי ערוצים ראשוני לפי השאילתה המקורית
             channelMatchResults = await detectChannelMatches(cleanQuery);
-
-            clearTimeout(debounceTimeout);
-            debounceTimeout = setTimeout(async () => {
-                if (searchToken !== currentSearchToken || currentChannelFilter) return;
-
-                const translated = await getTranslationWithDB(cleanQuery);
-                if (translated && translated.toLowerCase() !== cleanQuery.toLowerCase()) {
-                    // חיפוש סרטונים לפי התרגום
-                    const { data: transData } = await client.rpc('search_videos_prioritized', { search_term: translated })
-                        .range(0, VIDEOS_PER_PAGE - 1);
-
-                    if (searchToken !== currentSearchToken || currentChannelFilter) return;
-
-                    if (transData && transData.length > 0) {
-                        renderVideoGrid(transData, true);
-                    }
-                }
-            }, 800);
         }
     }
 
