@@ -394,7 +394,16 @@ async function detectChannelMatches(query) {
     if (!normalized || normalized.length < 2) return [];
 
     try {
-        const variants = createTranslatedSearchVariants(normalized).map((v) => escapeForLike(v));
+        const translated = await getTranslationWithDB(normalized);
+
+        const allVariants = new Set(createTranslatedSearchVariants(normalized));
+        if (translated && translated.toLowerCase() !== normalized.toLowerCase()) {
+            createTranslatedSearchVariants(translated).forEach((variant) => allVariants.add(variant));
+        }
+
+        const variants = [...allVariants].map((v) => escapeForLike(v)).filter(Boolean);
+        if (variants.length === 0) return [];
+
         const orQuery = variants.map((v) => `channel_title.ilike.%${v}%`).join(',');
 
         const { data, error } = await client
@@ -428,26 +437,36 @@ async function detectChannelMatches(query) {
         const names = [...channelsMap.values()];
         if (names.length === 0) return [];
 
-        const q = normalized.toLowerCase();
-        const qKey = normalizeChannelKey(normalized);
-        const words = q.split(' ').filter(Boolean);
-        const keyWords = qKey.split(' ').filter(Boolean);
+        const rankingQueries = [normalized];
+        if (translated && translated.toLowerCase() !== normalized.toLowerCase()) {
+            rankingQueries.push(translated);
+        }
 
         const scored = names
             .map((channel) => {
                 const n = channel.name.toLowerCase();
                 const nKey = normalizeChannelKey(channel.name);
                 let score = 0;
-                if (n === q) score += 100;
-                if (n.startsWith(q)) score += 70;
-                if (n.includes(q)) score += 40;
-                if (nKey === qKey) score += 100;
-                if (nKey.startsWith(qKey)) score += 65;
-                if (nKey.includes(qKey)) score += 45;
-                const covered = words.filter((w) => n.includes(w)).length;
-                const coveredKey = keyWords.filter((w) => nKey.includes(w)).length;
-                score += covered * 8;
-                score += coveredKey * 10;
+
+                rankingQueries.forEach((rq) => {
+                    const q = rq.toLowerCase();
+                    const qKey = normalizeChannelKey(rq);
+                    const words = q.split(' ').filter(Boolean);
+                    const keyWords = qKey.split(' ').filter(Boolean);
+
+                    if (n === q) score += 100;
+                    if (n.startsWith(q)) score += 70;
+                    if (n.includes(q)) score += 40;
+                    if (nKey === qKey) score += 100;
+                    if (nKey.startsWith(qKey)) score += 65;
+                    if (nKey.includes(qKey)) score += 45;
+
+                    const covered = words.filter((w) => n.includes(w)).length;
+                    const coveredKey = keyWords.filter((w) => nKey.includes(w)).length;
+                    score += covered * 8;
+                    score += coveredKey * 10;
+                });
+
                 score += Math.min(channel.sampleCount, 10);
                 return { ...channel, score };
             })
@@ -462,6 +481,7 @@ async function detectChannelMatches(query) {
 
     return [];
 }
+
 
 
 function renderSearchControls() {
@@ -597,29 +617,14 @@ async function fetchVideos(query = "", isAppend = false, options = {}) {
 
                 const translated = await getTranslationWithDB(cleanQuery);
                 if (translated && translated.toLowerCase() !== cleanQuery.toLowerCase()) {
-                    
-                    // --- תוספת: חיפוש ערוצים גם לפי התרגום ---
-                    const translatedChannels = await detectChannelMatches(translated);
-                    
-                    // מיזוג תוצאות
-                    const existingNames = new Set(channelMatchResults.map(c => normalizeChannelKey(c.name)));
-                    translatedChannels.forEach(tc => {
-                        if (!existingNames.has(normalizeChannelKey(tc.name))) {
-                            channelMatchResults.push(tc);
-                        }
-                    });
-                    
-                    channelMatchResults = channelMatchResults.slice(0, 12);
-                    renderSearchControls();
-
                     // חיפוש סרטונים לפי התרגום
                     const { data: transData } = await client.rpc('search_videos_prioritized', { search_term: translated })
                         .range(0, VIDEOS_PER_PAGE - 1);
-                    
+
                     if (searchToken !== currentSearchToken || currentChannelFilter) return;
-                    
+
                     if (transData && transData.length > 0) {
-                        renderVideoGrid(transData, true); 
+                        renderVideoGrid(transData, true);
                     }
                 }
             }, 800);
