@@ -624,7 +624,7 @@ body {
 }
 
 .channel-card {
-    background: var(--light-grey);
+    background: var(--spotify-green);
     border: 1px solid transparent;
     border-radius: 12px;
     padding: 9px;
@@ -642,14 +642,14 @@ body {
 }
 
 .channel-card:hover {
-    background: #282828;
+    background: #e07426;
     transform: translateY(-5px);
     box-shadow: 0 10px 20px rgba(0,0,0,0.5);
     border-color: #333;
 }
 
 .channel-card.active {
-    background: rgba(24, 124, 134, 0.22);
+    background: #e07426;
     border-color: var(--spotify-green);
     box-shadow: 0 0 0 1px rgba(24, 124, 134, 0.55);
 }
