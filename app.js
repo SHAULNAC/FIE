@@ -26,6 +26,37 @@ let currentAppMode = 'home'; // יכול להיות 'home', 'history', או 'fav
 let ytPlayer = null;
 let currentPlayingId = null;
 let safetyTimer = null;
+let lastPlayedEncodedData = null;
+
+const APP_STATE_STORAGE_KEY = 'fie:last-app-state';
+
+function saveAppState() {
+    try {
+        const searchInput = document.getElementById('globalSearch');
+        const state = {
+            appMode: currentAppMode,
+            searchQuery: searchInput ? searchInput.value : currentSearchQuery,
+            channelFilter: currentChannelFilter,
+            isSearchPlaybackPinned,
+            lastPlayedEncodedData,
+            currentPlayingId
+        };
+        localStorage.setItem(APP_STATE_STORAGE_KEY, JSON.stringify(state));
+    } catch (err) {
+        console.warn('לא ניתן לשמור מצב אחרון:', err);
+    }
+}
+
+function loadSavedAppState() {
+    try {
+        const raw = localStorage.getItem(APP_STATE_STORAGE_KEY);
+        if (!raw) return null;
+        return JSON.parse(raw);
+    } catch (err) {
+        console.warn('לא ניתן לקרוא מצב שמור:', err);
+        return null;
+    }
+}
 
 const categoryMap = {
     "1": "סרטים ואנימציה",
@@ -168,6 +199,8 @@ function playVideoFromObject(vid) {
 
 async function init() {
     try {
+        const savedState = loadSavedAppState();
+
         const { data: { user } } = await client.auth.getUser();
         currentUser = user;
         
@@ -187,9 +220,29 @@ async function init() {
             loadSidebarLists();
         }
 
-        fetchVideos();
+        if (savedState?.searchQuery) {
+            const searchInput = document.getElementById('globalSearch');
+            if (searchInput) searchInput.value = savedState.searchQuery;
+            currentChannelFilter = savedState.channelFilter || null;
+            isSearchPlaybackPinned = Boolean(savedState.isSearchPlaybackPinned);
+            fetchVideos(savedState.searchQuery, false, { preserveChannelFilter: Boolean(savedState.channelFilter) });
+        } else {
+            fetchVideos();
+        }
+
+        if (savedState?.appMode === 'history' && currentUser) {
+            displayHistory();
+        } else if (savedState?.appMode === 'favorites' && currentUser) {
+            displayFavorites();
+        }
+
+        if (savedState?.lastPlayedEncodedData) {
+            preparePlay(savedState.lastPlayedEncodedData);
+        }
+
         initDraggable();
         initResizer(); 
+        renderSearchControls();
 
     } catch (error) {
         console.error("Error during init:", error);
@@ -436,6 +489,7 @@ async function fetchVideos(query = "", isAppend = false, options = {}) {
     }
 
     isLoadingVideos = false;
+    saveAppState();
 }
 
 // הגדרות טבלת התרגומים (שנה אותן לפי מה שהגדרת ב-Supabase)
@@ -562,8 +616,10 @@ async function preparePlay(encodedData) {
     
     try {
         const data = JSON.parse(decodeURIComponent(atob(encodedData)));
+        lastPlayedEncodedData = encodedData;
         currentPlayingId = data.id; 
         activeQueue = isSearchPlaybackPinned && pinnedSearchResults ? [...pinnedSearchResults] : [...displayResults];
+        saveAppState();
 
         // --- שליחה לגוגל אנליטיקס ---
         if (typeof gtag === 'function') {
@@ -1053,6 +1109,7 @@ function goHome() {
     // כשאנחנו קוראים לה ככה, היא כבר מאפסת את המשתנים (loadedVideosCount, hasMoreVideos)
     // בזכות בלוק ה- if (!isAppend) שכבר קיים אצלך בקוד!
     fetchVideos("");
+    saveAppState();
 }
 
 async function displayHistory() {
@@ -1062,6 +1119,7 @@ async function displayHistory() {
     const title = document.getElementById('main-title');
     if (title) title.textContent = "היסטוריית צפייה";
     if (data) renderVideoGrid(data.map(i => i.videos).filter(v => v));
+    saveAppState();
 }
 
 async function displayFavorites() {
@@ -1071,6 +1129,7 @@ async function displayFavorites() {
     const title = document.getElementById('main-title');
     if (title) title.textContent = "מועדפים";
     if (data) renderVideoGrid(data.map(i => i.videos).filter(v => v));
+    saveAppState();
 }
 
 function showPrivacy() {
@@ -1168,6 +1227,7 @@ function toggleSearchPlaybackPin() {
     isSearchPlaybackPinned = !isSearchPlaybackPinned;
     pinnedSearchResults = isSearchPlaybackPinned ? [...displayResults] : null;
     renderSearchControls();
+    saveAppState();
 }
 
 window.applyChannelFilter = applyChannelFilter;
