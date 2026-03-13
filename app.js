@@ -5,13 +5,13 @@ const client = supabase.createClient(SB_URL, SB_KEY);
 let currentUser = null;
 let analyticsTimeout = null; 
 let userFavorites = [];
-let debounceTimeout = null;
 let isPlaying = false;
 let loadedVideosCount = 0;
 const VIDEOS_PER_PAGE = 50; 
 let isLoadingVideos = false;
 let hasMoreVideos = true;
 let currentSearchQuery = ""; 
+let currentResolvedSearchQuery = "";
 let currentSearchToken = 0;
 let channelMatchResults = [];
 let pinnedSearchResults = null;
@@ -571,6 +571,7 @@ async function fetchVideos(query = "", isAppend = false, options = {}) {
 
     if (!isAppend) {
         currentSearchQuery = normalizeSearchTerm(query);
+        currentResolvedSearchQuery = "";
         loadedVideosCount = 0;
         hasMoreVideos = true;
         if (!preserveChannelFilter) {
@@ -606,31 +607,30 @@ async function fetchVideos(query = "", isAppend = false, options = {}) {
     } else {
         // חיפוש טקסט חופשי
         const cleanQuery = currentSearchQuery.replace(/[^\w\sא-ת]/g, ' ').trim();
-        const { data } = await client.rpc('search_videos_prioritized', { search_term: cleanQuery })
+
+        if (!cleanQuery) {
+            fetchedData = [];
+        } else {
+            if (!isAppend || !currentResolvedSearchQuery) {
+                const translated = await getTranslationWithDB(cleanQuery);
+                currentResolvedSearchQuery = translated && translated.trim()
+                    ? translated.trim()
+                    : cleanQuery;
+            }
+
+            if (searchToken !== currentSearchToken || currentChannelFilter) {
+                isLoadingVideos = false;
+                return;
+            }
+
+            const { data } = await client.rpc('search_videos_prioritized', { search_term: currentResolvedSearchQuery })
             .range(from, to);
-        fetchedData = data || [];
+            fetchedData = data || [];
+        }
 
         if (!isAppend) {
             // זיהוי ערוצים ראשוני לפי השאילתה המקורית
             channelMatchResults = await detectChannelMatches(cleanQuery);
-
-            clearTimeout(debounceTimeout);
-            debounceTimeout = setTimeout(async () => {
-                if (searchToken !== currentSearchToken || currentChannelFilter) return;
-
-                const translated = await getTranslationWithDB(cleanQuery);
-                if (translated && translated.toLowerCase() !== cleanQuery.toLowerCase()) {
-                    // חיפוש סרטונים לפי התרגום
-                    const { data: transData } = await client.rpc('search_videos_prioritized', { search_term: translated })
-                        .range(0, VIDEOS_PER_PAGE - 1);
-
-                    if (searchToken !== currentSearchToken || currentChannelFilter) return;
-
-                    if (transData && transData.length > 0) {
-                        renderVideoGrid(transData, true);
-                    }
-                }
-            }, 800);
         }
     }
 
