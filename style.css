@@ -473,3 +473,37 @@ body {
     border-radius: 50px; font-weight: bold; cursor: pointer; transition: transform 0.2s, filter 0.2s; 
 }
 .modal-confirm-btn:hover { transform: scale(1.05); filter: brightness(1.1); }
+
+/* --- Search Controls --- */
+.search-controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-bottom: 18px;
+}
+
+.search-chip {
+    border: 1px solid var(--border-color);
+    background: rgba(24, 24, 24, 0.9);
+    color: var(--text-white);
+    border-radius: 999px;
+    padding: 8px 14px;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    font-size: 13px;
+    font-weight: 500;
+}
+
+.search-chip:hover {
+    border-color: var(--spotify-green);
+    transform: translateY(-1px);
+}
+
+.search-chip.active {
+    background: var(--spotify-green);
+    color: #071012;
+    border-color: var(--spotify-green);
+}
