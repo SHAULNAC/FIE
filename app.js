@@ -398,15 +398,15 @@ async function detectChannelMatches(query) {
 
     try {
         const translated = await getTranslationWithDB(normalized);
-
-        const allVariants = new Set(createTranslatedSearchVariants(normalized));
-        if (translated && translated.toLowerCase() !== normalized.toLowerCase()) {
-            createTranslatedSearchVariants(translated).forEach((variant) => allVariants.add(variant));
+        
+        // יצירת מערך פשוט: המקור והתרגום (בלי "לפרק" אותם לווריאנטים שבורים)
+        const searchTerms = [normalized];
+        if (translated) {
+            searchTerms.push(translated);
         }
 
-        const variants = [...allVariants].map((v) => escapeForLike(v)).filter(Boolean);
-        if (variants.length === 0) return [];
-
+        // בניית השאילתה - מחפשים את כל הביטוי (למשל "Zosha Zusha") או את המקור
+        const variants = searchTerms.map((v) => escapeForLike(v)).filter(Boolean);
         const orQuery = variants.map((v) => `channel_title.ilike.%${v}%`).join(',');
 
         const { data, error } = await client
@@ -423,6 +423,7 @@ async function detectChannelMatches(query) {
         const channelsMap = new Map();
         for (const row of (data || [])) {
             if (!row.channel_title) continue;
+            // שימוש בנרמול רק לצורך ה-Key (איחוד ערוצים זהים)
             const key = normalizeChannelKey(row.channel_title);
             if (!channelsMap.has(key)) {
                 channelsMap.set(key, {
@@ -441,39 +442,29 @@ async function detectChannelMatches(query) {
         if (names.length === 0) return [];
 
         const rankingQueries = [normalized];
-        if (translated && translated.toLowerCase() !== normalized.toLowerCase()) {
-            rankingQueries.push(translated);
-        }
+        if (translated) rankingQueries.push(translated);
 
         const scored = names
             .map((channel) => {
                 const n = channel.name.toLowerCase();
-                const nKey = normalizeChannelKey(channel.name);
                 let score = 0;
 
-                rankingQueries.forEach((rq) => {
-                    const q = rq.toLowerCase();
-                    const qKey = normalizeChannelKey(rq);
-                    const words = q.split(' ').filter(Boolean);
-                    const keyWords = qKey.split(' ').filter(Boolean);
-
-                    if (n === q) score += 100;
-                    if (n.startsWith(q)) score += 70;
-                    if (n.includes(q)) score += 40;
-                    if (nKey === qKey) score += 100;
-                    if (nKey.startsWith(qKey)) score += 65;
-                    if (nKey.includes(qKey)) score += 45;
-
-                    const covered = words.filter((w) => n.includes(w)).length;
-                    const coveredKey = keyWords.filter((w) => nKey.includes(w)).length;
-                    score += covered * 8;
-                    score += coveredKey * 10;
+                rankingQueries.forEach((q) => {
+                    const qLow = q.toLowerCase();
+                    if (n === qLow) score += 100;
+                    else if (n.includes(qLow)) score += 60;
+                    
+                    // בדיקה מול מילים בודדות בתרגום (אם התרגום הוא "Zosha Zusha")
+                    const words = qLow.split(' ');
+                    words.forEach(w => {
+                        if (w.length > 2 && n.includes(w)) score += 20;
+                    });
                 });
 
                 score += Math.min(channel.sampleCount, 10);
                 return { ...channel, score };
             })
-            .filter((item) => item.score >= 40)
+            .filter((item) => item.score >= 30) // רף מעט נמוך יותר כדי לא לפספס
             .sort((a, b) => b.score - a.score)
             .slice(0, 12);
 
@@ -484,7 +475,6 @@ async function detectChannelMatches(query) {
 
     return [];
 }
-
 
 
 function renderSearchControls() {
