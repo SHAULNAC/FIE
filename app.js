@@ -361,8 +361,10 @@ async function fetchVideos(query = "", isAppend = false, options = {}) {
         currentSearchQuery = normalizeSearchTerm(query);
         loadedVideosCount = 0;
         hasMoreVideos = true;
-        channelMatchResults = [];
-        if (!preserveChannelFilter) currentChannelFilter = null;
+        if (!preserveChannelFilter) {
+            channelMatchResults = [];
+            currentChannelFilter = null;
+        }
     } else if (!hasMoreVideos) {
         return;
     }

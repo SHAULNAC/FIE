@@ -516,9 +516,10 @@ body {
 
 .channel-cards-row {
     display: flex;
-    gap: 12px;
+    gap: 14px;
     overflow-x: auto;
-    padding-bottom: 4px;
+    overflow-y: visible;
+    padding: 6px 2px 6px;
 }
 
 .channel-cards-row::-webkit-scrollbar {
@@ -526,37 +527,38 @@ body {
 }
 
 .channel-card {
-    background: linear-gradient(160deg, rgba(24, 53, 86, 0.32), rgba(57, 36, 93, 0.28));
-    border: 1px solid rgba(120, 171, 255, 0.28);
+    background: var(--light-grey);
+    border: 1px solid #2f3a3f;
     border-radius: 12px;
     padding: 10px;
     cursor: pointer;
     display: flex;
     align-items: center;
-    gap: 10px;
-    min-width: 260px;
+    gap: 12px;
+    min-width: 300px;
     text-align: right;
     color: var(--text-white);
-    transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
 }
 
 .channel-card:hover {
-    transform: translateY(-2px);
-    border-color: #8fb5ff;
+    background: #222a2d;
+    border-color: var(--spotify-green);
     box-shadow: 0 8px 20px rgba(0, 0, 0, 0.32);
 }
 
 .channel-card.active {
-    border-color: #7de1ff;
-    box-shadow: 0 0 0 1px rgba(125, 225, 255, 0.4);
+    background: #1f2f31;
+    border-color: var(--spotify-green);
+    box-shadow: 0 0 0 1px rgba(24, 124, 134, 0.55);
 }
 
 .channel-card-thumb {
-    width: 88px;
-    height: 56px;
+    width: 128px;
+    height: 72px;
     border-radius: 8px;
     overflow: hidden;
-    background: rgba(0, 0, 0, 0.35);
+    background: rgba(0, 0, 0, 0.45);
     flex-shrink: 0;
 }
 
@@ -572,17 +574,21 @@ body {
     display: flex;
     align-items: center;
     justify-content: center;
-    color: #b4c7f5;
+    color: var(--text-dim);
 }
 
 .channel-card-info h3 {
     margin: 0;
-    font-size: 14px;
-    line-height: 1.2;
+    font-size: 15px;
+    line-height: 1.25;
+    max-width: 145px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .channel-card-info p {
     margin: 6px 0 0;
     font-size: 12px;
-    color: #d4def5;
+    color: var(--text-dim);
 }
