@@ -894,7 +894,7 @@ async function fetchSmartRecommendation() {
         // אנחנו מוודאים ששולפים את ה-tags וה-category_id המדויקים
         const { data: currentVid, error: vidError } = await client
             .from('videos')
-            .select('category_id, tags')
+            .select('category_id, tags, channel_title')
             .eq('id', currentPlayingId)
             .single();
 
@@ -911,7 +911,8 @@ async function fetchSmartRecommendation() {
             p_user_id: currentUser.id,
             p_current_video_id: currentPlayingId,
             p_category_id: currentVid.category_id,
-            p_current_tags: tagsString, // שליחה כטקסט נקי
+            p_current_tags: tagsString, 
+            p_channel_title: currentVid.channel_title// שליחה כטקסט נקי
             p_limit: 1 
         });
 
