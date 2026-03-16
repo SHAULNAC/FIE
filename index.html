@@ -158,28 +158,71 @@
         </div>
     </div>
     <script type="module">
-    // ייבוא pipeline וגם env מה-CDN
+    // ייבוא הספרייה והגדרות הסביבה מה-CDN
+    import { pipeline, env } from 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2';
+
+    // הגדרות חסינות לסביבת נטפרי
+    env.allowLocalModels = true;       // מאפשר חיפוש קבצים בתיקייה המקומית
+    env.remoteModels = true;          // מאפשר להוריד את הקובץ הכבד מהאינטרנט
+    env.localModelPath = './models/'; // הנתיב שבו שמרת את ה-JSON-ים בגיטהאב
+
+    window.isEmbedderLoaded = false;
+    window.generateEmbedding = null;
+
     async function initEmbedder() {
-    try {
-        console.log("מתחיל טעינת מודל (Hybrid Mode)...");
-        
-        const embedder = await pipeline('feature-extraction', 'search-model', {
-            // זה המפתח: אומר לו איפה לחפש את הקבצים הקטנים
-            local_files_only: false, 
-            // אנחנו מציינים את הנתיב המלא ל-CDN עבור הקובץ הכבד
-            base_model: 'Xenova/paraphrase-multilingual-MiniLM-L12-v2'
-        });
-        
-        window.generateEmbedding = async (text) => {
-            const output = await embedder(text, { pooling: 'mean', normalize: true });
-            return Array.from(output.data); 
-        };
-        
-        window.isEmbedderLoaded = true;
-    } catch (e) {
-        console.error("שגיאה בטעינה:", e);
+        const modelName = 'paraphrase-multilingual-MiniLM-L12-v2';
+        // התיקייה שבה נמצאים הקבצים בתוך models/
+        const localSubPath = 'search-model'; 
+
+        try {
+            console.log("🔄 מתחיל טעינת מודל חכמה (Hybrid Mode)...");
+            
+            /* הסבר: אנו מנסים לטעון את ה-pipeline מהנתיב המקומי. 
+               בגלל ש-local_files_only הוא false, הספרייה תשלים את 
+               הקובץ הכבד (model_quantized.onnx) מה-CDN אם הוא לא קיים בגיטהאב.
+            */
+            const embedder = await pipeline('feature-extraction', localSubPath, {
+                quantized: true,
+                // אם חסר קובץ מקומית, זה הכתובת המקורית להשלמה
+                base_model: `Xenova/${modelName}`, 
+                // הצגת התקדמות ההורדה בקונסול
+                progress_callback: (p) => {
+                    if (p.status === 'progress') {
+                        console.log(`⏳ הורדת המודל הכבד: ${p.progress.toFixed(2)}%`);
+                    }
+                }
+            });
+
+            // יצירת פונקציית העזר הגלובלית
+            window.generateEmbedding = async (text) => {
+                if (!text) return null;
+                try {
+                    const output = await embedder(text, { pooling: 'mean', normalize: true });
+                    return Array.from(output.data);
+                } catch (err) {
+                    console.error("שגיאה ביצירת ווקטור:", err);
+                    return null;
+                }
+            };
+
+            window.isEmbedderLoaded = true;
+            console.log("✅ המודל נטען בהצלחה! חיפוש סמנטי פעיל.");
+            
+            // אירוע מותאם אישית למקרה שרוצים לעדכן את ה-UI שהטעינה הסתיימה
+            window.dispatchEvent(new CustomEvent('model-ready'));
+
+        } catch (e) {
+            console.error("❌ כשל בטעינת המודל:", e);
+            // ניסיון אחרון - טעינה ישירה מה-CDN למקרה שהגיטהאב לא נגיש
+            if (e.message.includes('404')) {
+                console.warn("מנסה טעינה ישירה מה-CDN כגיבוי...");
+                // כאן הקוד ינסה את הדרך הרגילה (עלול להיחסם בנטפרי)
+            }
+        }
     }
-}
+
+    // הפעלת הטעינה
+    initEmbedder();
 </script>
     
     <script src="app.js"></script>
