@@ -555,11 +555,9 @@ async function fetchVideos(query = "", isAppend = false, options = {}) {
     isLoadingVideos = true;
     
     const from = loadedVideosCount;
-    // בחיפוש ווקטורי עם RPC, אנחנו נעביר את ה-offset כפרמטר
     let fetchedData = null;
 
     if (currentChannelFilter) {
-        // חיפוש ממוקד ערוץ (ללא שינוי)
         const { data } = await client.from('videos')
             .select('id, title, channel_title, thumbnail, duration, views, likes, category_id')
             .ilike('channel_title', currentChannelFilter)
@@ -567,14 +565,12 @@ async function fetchVideos(query = "", isAppend = false, options = {}) {
             .range(from, from + VIDEOS_PER_PAGE - 1);
         fetchedData = data || [];
     } else if (!currentSearchQuery) {
-        // דף הבית - סרטונים אחרונים (ללא שינוי)
         const { data } = await client.from('videos')
             .select('id, title, channel_title, thumbnail, duration, views, likes, category_id')
             .order('published_at', { ascending: false })
             .range(from, from + VIDEOS_PER_PAGE - 1);
         fetchedData = data;
     } else {
-        // חיפוש חופשי - מבוסס ווקטור בלבד
         const cleanQuery = currentSearchQuery.replace(/[^\w\sא-ת]/g, ' ').trim();
 
         if (!cleanQuery) {
@@ -582,9 +578,7 @@ async function fetchVideos(query = "", isAppend = false, options = {}) {
         } else {
             if (!isAppend || !currentResolvedSearchQuery) {
                 const translated = await getTranslationWithDB(cleanQuery);
-                currentResolvedSearchQuery = translated && translated.trim()
-                    ? translated.trim()
-                    : cleanQuery;
+                currentResolvedSearchQuery = (translated && translated.trim()) ? translated.trim() : cleanQuery;
             }
 
             if (searchToken !== currentSearchToken || currentChannelFilter) {
@@ -592,19 +586,19 @@ async function fetchVideos(query = "", isAppend = false, options = {}) {
                 return;
             }
 
-            // קבלת הווקטור (מהמטמון או מהמודל בדפדפן)
+            // חיפוש ווקטורי בלבד
             const vector = await getVectorForSearch(currentResolvedSearchQuery);
 
             if (vector) {
                 const { data, error } = await client.rpc('search_videos_by_vector', { 
                     query_embedding: vector, 
-                    match_threshold: 0.25, 
+                    match_threshold: 0.2, // סף רגישות
                     match_count: VIDEOS_PER_PAGE,
                     p_offset: from 
                 });
                 
                 if (error) {
-                    console.error("Vector search error:", error);
+                    console.error("שגיאת חיפוש ווקטורי:", error);
                     fetchedData = [];
                 } else {
                     fetchedData = data || [];
@@ -631,10 +625,7 @@ async function fetchVideos(query = "", isAppend = false, options = {}) {
         renderVideoGrid(fetchedData, isAppend);
         if (playbackMode === 'playlist' && !isAppend) pinnedSearchResults = [...displayResults];
         loadedVideosCount += fetchedData.length;
-        
-        if (fetchedData.length < VIDEOS_PER_PAGE) {
-            hasMoreVideos = false;
-        }
+        hasMoreVideos = fetchedData.length === VIDEOS_PER_PAGE;
     } else {
         if (!isAppend) {
             renderVideoGrid([]);
@@ -645,43 +636,6 @@ async function fetchVideos(query = "", isAppend = false, options = {}) {
 
     isLoadingVideos = false;
     saveAppState();
-
-    if (currentPlayingId) {
-        updateMediaSessionMetadata({ 
-            id: currentPlayingId, 
-            t: document.getElementById('current-title')?.textContent, 
-            c: document.getElementById('current-channel')?.textContent 
-        });
-    }
-}
-    renderSearchControls();
-
-    if (fetchedData && fetchedData.length > 0) {
-        renderVideoGrid(fetchedData, isAppend);
-        if (playbackMode === 'playlist' && !isAppend) pinnedSearchResults = [...displayResults];
-        loadedVideosCount += fetchedData.length;
-        
-        if (fetchedData.length < VIDEOS_PER_PAGE) {
-            hasMoreVideos = false;
-        }
-    } else {
-        if (!isAppend) {
-            renderVideoGrid([]);
-            if (playbackMode === 'playlist') pinnedSearchResults = [];
-        }
-        hasMoreVideos = false;
-    }
-
-    isLoadingVideos = false;
-    saveAppState();
-
-    if (currentPlayingId) {
-        updateMediaSessionMetadata({ 
-            id: currentPlayingId, 
-            t: document.getElementById('current-title')?.textContent, 
-            c: document.getElementById('current-channel')?.textContent 
-        });
-    }
 }
 
 async function getTranslationWithDB(text) {
