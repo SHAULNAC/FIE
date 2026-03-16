@@ -492,6 +492,44 @@ function renderSearchControls() {
     controls.innerHTML = `${channelCards}${modeToggle}`;
 }
 
+async function getVectorForSearch(searchQuery) {
+    if (!searchQuery) return null;
+
+    // 1. בדיקה אם הווקטור כבר קיים בטבלת המטמון ב-Supabase
+    const { data: cacheData, error: cacheError } = await client
+        .from('search_vector_cache')
+        .select('embedding')
+        .eq('query_text', searchQuery)
+        .single();
+
+    if (cacheData && cacheData.embedding) {
+        console.log("ווקטור נמצא במטמון!");
+        return cacheData.embedding;
+    }
+
+    // 2. אם לא נמצא, נוודא שהמודל נטען בדפדפן ונייצר ווקטור
+    if (!window.isEmbedderLoaded || typeof window.generateEmbedding !== 'function') {
+        console.warn("המודל עדיין לא מוכן, לא ניתן לייצר ווקטור כרגע.");
+        return null; 
+    }
+
+    console.log("מייצר ווקטור חדש מצד הלקוח...");
+    const vector = await window.generateEmbedding(searchQuery);
+
+    // 3. שמירת הווקטור שנוצר בטבלת המטמון לשימוש עתידי
+    if (vector) {
+        const { error: insertError } = await client
+            .from('search_vector_cache')
+            .insert([{ query_text: searchQuery, embedding: vector }]);
+            
+        if (insertError) {
+            console.error("שגיאה בשמירת הווקטור למטמון:", insertError);
+        }
+    }
+
+    return vector;
+}
+
 
 
 async function fetchVideos(query = "", isAppend = false, options = {}) {
@@ -517,26 +555,26 @@ async function fetchVideos(query = "", isAppend = false, options = {}) {
     isLoadingVideos = true;
     
     const from = loadedVideosCount;
-    const to = from + VIDEOS_PER_PAGE - 1;
+    // בחיפוש ווקטורי עם RPC, אנחנו נעביר את ה-offset כפרמטר
     let fetchedData = null;
 
     if (currentChannelFilter) {
-        // חיפוש ממוקד ערוץ
+        // חיפוש ממוקד ערוץ (ללא שינוי)
         const { data } = await client.from('videos')
             .select('id, title, channel_title, thumbnail, duration, views, likes, category_id')
             .ilike('channel_title', currentChannelFilter)
             .order('published_at', { ascending: false })
-            .range(from, to);
+            .range(from, from + VIDEOS_PER_PAGE - 1);
         fetchedData = data || [];
     } else if (!currentSearchQuery) {
-        // דף הבית - סרטונים אחרונים
+        // דף הבית - סרטונים אחרונים (ללא שינוי)
         const { data } = await client.from('videos')
             .select('id, title, channel_title, thumbnail, duration, views, likes, category_id')
             .order('published_at', { ascending: false })
-            .range(from, to);
+            .range(from, from + VIDEOS_PER_PAGE - 1);
         fetchedData = data;
     } else {
-        // חיפוש טקסט חופשי
+        // חיפוש חופשי - מבוסס ווקטור בלבד
         const cleanQuery = currentSearchQuery.replace(/[^\w\sא-ת]/g, ' ').trim();
 
         if (!cleanQuery) {
@@ -554,13 +592,29 @@ async function fetchVideos(query = "", isAppend = false, options = {}) {
                 return;
             }
 
-            const { data } = await client.rpc('search_videos_prioritized', { search_term: currentResolvedSearchQuery })
-            .range(from, to);
-            fetchedData = data || [];
+            // קבלת הווקטור (מהמטמון או מהמודל בדפדפן)
+            const vector = await getVectorForSearch(currentResolvedSearchQuery);
+
+            if (vector) {
+                const { data, error } = await client.rpc('search_videos_by_vector', { 
+                    query_embedding: vector, 
+                    match_threshold: 0.25, 
+                    match_count: VIDEOS_PER_PAGE,
+                    p_offset: from 
+                });
+                
+                if (error) {
+                    console.error("Vector search error:", error);
+                    fetchedData = [];
+                } else {
+                    fetchedData = data || [];
+                }
+            } else {
+                fetchedData = [];
+            }
         }
 
         if (!isAppend) {
-            // זיהוי ערוצים מתוך אותן תוצאות חיפוש (ללא שאילתה נוספת)
             const channelQuery = currentResolvedSearchQuery || cleanQuery;
             channelMatchResults = detectChannelMatchesFromResults(fetchedData, channelQuery);
         }
@@ -571,6 +625,35 @@ async function fetchVideos(query = "", isAppend = false, options = {}) {
         return;
     }
 
+    renderSearchControls();
+
+    if (fetchedData && fetchedData.length > 0) {
+        renderVideoGrid(fetchedData, isAppend);
+        if (playbackMode === 'playlist' && !isAppend) pinnedSearchResults = [...displayResults];
+        loadedVideosCount += fetchedData.length;
+        
+        if (fetchedData.length < VIDEOS_PER_PAGE) {
+            hasMoreVideos = false;
+        }
+    } else {
+        if (!isAppend) {
+            renderVideoGrid([]);
+            if (playbackMode === 'playlist') pinnedSearchResults = [];
+        }
+        hasMoreVideos = false;
+    }
+
+    isLoadingVideos = false;
+    saveAppState();
+
+    if (currentPlayingId) {
+        updateMediaSessionMetadata({ 
+            id: currentPlayingId, 
+            t: document.getElementById('current-title')?.textContent, 
+            c: document.getElementById('current-channel')?.textContent 
+        });
+    }
+}
     renderSearchControls();
 
     if (fetchedData && fetchedData.length > 0) {
