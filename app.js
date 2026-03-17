@@ -37,6 +37,36 @@ const COL_ORIGINAL = 'original_text';     // שם העמודה של הטקסט �
 const COL_TRANSLATED = 'translated_text'; // שם העמודה של הטקסט המתורגם
 
 const APP_STATE_STORAGE_KEY = 'fie:last-app-state';
+let handlersBound = false;
+
+function safeBindOnce(fn) {
+    if (handlersBound) return;
+    handlersBound = true;
+    fn();
+}
+
+function resetAbortController() {
+    if (activeSearchAbortController) {
+        activeSearchAbortController.abort();
+    }
+    activeSearchAbortController = new AbortController();
+    return activeSearchAbortController.signal;
+}
+
+function isStaleSearch(token) {
+    return token !== currentSearchToken;
+}
+
+function restoreStateLight() {
+    const state = loadSavedAppState();
+    if (!state) return;
+
+    currentAppMode = state.appMode || currentAppMode;
+    currentChannelFilter = state.channelFilter || null;
+    playbackMode = state.playbackMode || playbackMode;
+    currentPlayingId = state.currentPlayingId || currentPlayingId;
+    lastPlayedEncodedData = state.lastPlayedEncodedData || lastPlayedEncodedData;
+}
 
 function saveAppState() {
     try {
@@ -165,17 +195,32 @@ function startVoiceSearch() {
     recognition.start();
 }
 
-// מעבר יזום לסרטון הבא בתור
-function playNextVideo() {
-    if (!currentPlayingId || activeQueue.length === 0) return;
-    const currentIndex = activeQueue.findIndex(v => v.id === currentPlayingId);
-    
-    if (currentIndex >= 0 && currentIndex < activeQueue.length - 1) {
-        const nextVid = activeQueue[currentIndex + 1];
-        playVideoFromObject(nextVid);
-    } else {
-        console.log("אין סרטון הבא בתור");
+// מעבר יזום לסרטון הבא (במצב smart מתעדף המלצה חכמה)
+async function playNextVideo() {
+    if (!currentPlayingId) return;
+
+    if (playbackMode === 'smart') {
+        try {
+            const nextVid = await fetchSmartRecommendation();
+            if (nextVid) {
+                const videoData = {
+                    id: nextVid.id,
+                    t: nextVid.title,
+                    c: nextVid.channel_title,
+                    cat: categoryMap[nextVid.category_id] || "כללי",
+                    v: getVideoViews(nextVid),
+                    l: getVideoLikes(nextVid)
+                };
+                const encoded = btoa(encodeURIComponent(JSON.stringify(videoData)));
+                preparePlay(encoded);
+                return;
+            }
+        } catch (err) {
+            console.error("שגיאה בניסיון להביא המלצה חכמה בדילוג:", err);
+        }
     }
+
+    await playNextInQueue();
 }
 
 // מעבר יזום לסרטון הקודם בתור
@@ -642,14 +687,11 @@ function renderSearchControls() {
 async function fetchVideos(query = "", isAppend = false, options = {}) {
     if (isLoadingVideos && isAppend) return;
     currentAppMode = 'home';
-    
+
     const preserveChannelFilter = Boolean(options.preserveChannelFilter);
 
     if (!isAppend) {
-        if (activeSearchAbortController) {
-            activeSearchAbortController.abort();
-            activeSearchAbortController = null;
-        }
+        resetAbortController();
         currentSearchQuery = normalizeSearchTerm(query);
         currentResolvedSearchQuery = "";
         loadedVideosCount = 0;
@@ -664,121 +706,113 @@ async function fetchVideos(query = "", isAppend = false, options = {}) {
 
     const searchToken = !isAppend ? ++currentSearchToken : currentSearchToken;
     isLoadingVideos = true;
-    
+
     const from = loadedVideosCount;
     const to = from + VIDEOS_PER_PAGE - 1;
     let fetchedData = null;
 
-    if (currentChannelFilter) {
-        // חיפוש ממוקד ערוץ
-        const { data } = await client.from('videos')
-            .select('id, title, channel_title, thumbnail, duration, views, likes, category_id')
-            .ilike('channel_title', currentChannelFilter)
-            .order('published_at', { ascending: false })
-            .range(from, to);
-        fetchedData = data || [];
-    } else if (!currentSearchQuery) {
-        // דף הבית - סרטונים אחרונים
-        const { data } = await client.from('videos')
-            .select('id, title, channel_title, thumbnail, duration, views, likes, category_id')
-            .order('published_at', { ascending: false })
-            .range(from, to);
-        fetchedData = data;
-    } else {
-        // חיפוש טקסט חופשי
-        const cleanQuery = currentSearchQuery.replace(/[^\w\sא-ת]/g, ' ').trim();
-
-        if (!cleanQuery) {
-            fetchedData = [];
-        } else {
-            if (!isAppend || !currentResolvedSearchQuery) {
-                const cachedTranslation = await getCachedTranslation(cleanQuery);
-
-                if (searchToken !== currentSearchToken || currentChannelFilter) {
-                    isLoadingVideos = false;
-                    return;
-                }
-
-                if (cachedTranslation && cachedTranslation.trim()) {
-                    currentResolvedSearchQuery = `${cleanQuery} ${cachedTranslation.trim()}`;
-                } else {
-                    const searchAbortController = new AbortController();
-                    activeSearchAbortController = searchAbortController;
-
-                    const translated = await requestTranslationAndCache(cleanQuery, searchAbortController.signal);
-                    if (activeSearchAbortController === searchAbortController) activeSearchAbortController = null;
-
-                    if (searchToken !== currentSearchToken || currentChannelFilter) {
-                        isLoadingVideos = false;
-                        return;
-                    }
-
-                    if (translated && translated.trim()) {
-                        currentResolvedSearchQuery = `${cleanQuery} ${translated.trim()}`;
-                    } else {
-                        currentResolvedSearchQuery = cleanQuery;
-                    }
-                }
-            }
-
-            if (searchToken !== currentSearchToken || currentChannelFilter) {
-                isLoadingVideos = false;
-                return;
-            }
-
-            const { data } = await client.rpc('search_videos_prioritized', { search_term: currentResolvedSearchQuery })
-            .range(from, to);
+    try {
+        if (currentChannelFilter) {
+            // חיפוש ממוקד ערוץ
+            const { data } = await client.from('videos')
+                .select('id, title, channel_title, thumbnail, duration, views, likes, category_id')
+                .ilike('channel_title', currentChannelFilter)
+                .order('published_at', { ascending: false })
+                .range(from, to);
             fetchedData = data || [];
+        } else if (!currentSearchQuery) {
+            // דף הבית - סרטונים אחרונים
+            const { data } = await client.from('videos')
+                .select('id, title, channel_title, thumbnail, duration, views, likes, category_id')
+                .order('published_at', { ascending: false })
+                .range(from, to);
+            fetchedData = data;
+        } else {
+            // חיפוש טקסט חופשי
+            const cleanQuery = currentSearchQuery.replace(/[^\w\sא-ת]/g, ' ').trim();
+
+            if (!cleanQuery) {
+                fetchedData = [];
+            } else {
+                if (!isAppend || !currentResolvedSearchQuery) {
+                    const cachedTranslation = await getCachedTranslation(cleanQuery);
+
+                    if (isStaleSearch(searchToken) || currentChannelFilter) return;
+
+                    if (cachedTranslation && cachedTranslation.trim()) {
+                        currentResolvedSearchQuery = `${cleanQuery} ${cachedTranslation.trim()}`;
+                    } else {
+                        const searchAbortController = new AbortController();
+                        activeSearchAbortController = searchAbortController;
+
+                        const translated = await requestTranslationAndCache(cleanQuery, searchAbortController.signal);
+                        if (activeSearchAbortController === searchAbortController) activeSearchAbortController = null;
+
+                        if (isStaleSearch(searchToken) || currentChannelFilter) return;
+
+                        if (translated && translated.trim()) {
+                            currentResolvedSearchQuery = `${cleanQuery} ${translated.trim()}`;
+                        } else {
+                            currentResolvedSearchQuery = cleanQuery;
+                        }
+                    }
+                }
+
+                if (isStaleSearch(searchToken) || currentChannelFilter) return;
+
+                const { data } = await client.rpc('search_videos_prioritized', { search_term: currentResolvedSearchQuery })
+                    .range(from, to);
+                fetchedData = data || [];
+            }
+
+            if (!isAppend) {
+                // זיהוי ערוצים מתוך אותן תוצאות חיפוש (ללא שאילתה נוספת)
+                const resolvedQuery = normalizeSearchTerm(currentResolvedSearchQuery || '');
+                const translationOnly = resolvedQuery.startsWith(`${cleanQuery} `)
+                    ? normalizeSearchTerm(resolvedQuery.slice(cleanQuery.length))
+                    : '';
+                const englishOnly = normalizeSearchTerm((resolvedQuery.match(/[A-Za-z0-9 ]+/g) || []).join(' '));
+
+                const channelQueries = [cleanQuery, resolvedQuery, translationOnly, englishOnly]
+                    .filter(Boolean);
+                channelMatchResults = detectChannelMatchesFromResults(fetchedData, channelQueries);
+            }
         }
 
-        if (!isAppend) {
-            // זיהוי ערוצים מתוך אותן תוצאות חיפוש (ללא שאילתה נוספת)
-            const resolvedQuery = normalizeSearchTerm(currentResolvedSearchQuery || '');
-            const translationOnly = resolvedQuery.startsWith(`${cleanQuery} `)
-                ? normalizeSearchTerm(resolvedQuery.slice(cleanQuery.length))
-                : '';
-            const englishOnly = normalizeSearchTerm((resolvedQuery.match(/[A-Za-z0-9 ]+/g) || []).join(' '));
+        if (isStaleSearch(searchToken)) return;
 
-            const channelQueries = [cleanQuery, resolvedQuery, translationOnly, englishOnly]
-                .filter(Boolean);
-            channelMatchResults = detectChannelMatchesFromResults(fetchedData, channelQueries);
-        }
-    }
+        renderSearchControls();
 
-    if (searchToken !== currentSearchToken) {
-        isLoadingVideos = false;
-        return;
-    }
+        if (fetchedData && fetchedData.length > 0) {
+            renderVideoGrid(fetchedData, isAppend);
+            if (playbackMode === 'playlist' && !isAppend) pinnedSearchResults = [...displayResults];
+            loadedVideosCount += fetchedData.length;
 
-    renderSearchControls();
-
-    if (fetchedData && fetchedData.length > 0) {
-        renderVideoGrid(fetchedData, isAppend);
-        if (playbackMode === 'playlist' && !isAppend) pinnedSearchResults = [...displayResults];
-        loadedVideosCount += fetchedData.length;
-        
-        if (fetchedData.length < VIDEOS_PER_PAGE) {
+            if (fetchedData.length < VIDEOS_PER_PAGE) {
+                hasMoreVideos = false;
+            }
+        } else {
+            if (!isAppend) {
+                renderVideoGrid([]);
+                if (playbackMode === 'playlist') pinnedSearchResults = [];
+            }
             hasMoreVideos = false;
         }
-    } else {
-        if (!isAppend) {
-            renderVideoGrid([]);
-            if (playbackMode === 'playlist') pinnedSearchResults = [];
+
+        saveAppState();
+
+        if (currentPlayingId) {
+            updateMediaSessionMetadata({
+                id: currentPlayingId,
+                t: document.getElementById('current-title')?.textContent,
+                c: document.getElementById('current-channel')?.textContent
+            });
         }
-        hasMoreVideos = false;
-    }
-
-    isLoadingVideos = false;
-    saveAppState();
-
-    if (currentPlayingId) {
-        updateMediaSessionMetadata({ 
-            id: currentPlayingId, 
-            t: document.getElementById('current-title')?.textContent, 
-            c: document.getElementById('current-channel')?.textContent 
-        });
+    } finally {
+        isLoadingVideos = false;
     }
 }
+
 
 async function getCachedTranslation(text) {
     if (!text) return null;
@@ -837,6 +871,7 @@ async function requestTranslationAndCache(text, signal) {
 }
 
 // --- רינדור ---
+
 
 function renderVideoGrid(videos, isAppend = false) {
     const grid = document.getElementById('videoGrid');
@@ -1423,38 +1458,82 @@ if (contentArea) {
     });
 }
 
-const searchInput = document.getElementById('globalSearch');
-
-searchInput.addEventListener('focus', () => {
-    if (!searchInput.value) return;
+function handleSearchInputReset() {
+    const searchInput = document.getElementById('globalSearch');
+    if (!searchInput || !searchInput.value) return;
     searchInput.value = '';
     clearTimeout(analyticsTimeout);
     fetchVideos('');
-});
+}
 
-searchInput.addEventListener('click', () => {
-    if (!searchInput.value) return;
-    searchInput.value = '';
-    clearTimeout(analyticsTimeout);
-    fetchVideos('');
-});
-
-// אירוע הקלדה (Input) - חיפוש מיידי בכל שינוי, ללא השהיה
-searchInput.addEventListener('input', (e) => {
+function handleSearchInputTyping(e) {
     const query = normalizeSearchTerm(e.target.value);
     clearTimeout(analyticsTimeout);
     fetchVideos(query);
     triggerAnalytics(query);
-});
+}
 
-// אירוע מקלדת (Keydown) - אנטר שומר על אותה התנהגות מיידית
-searchInput.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') {
-        const query = normalizeSearchTerm(e.target.value);
-        clearTimeout(analyticsTimeout);
-        fetchVideos(query);
-        triggerAnalytics(query);
-    }
+function handleSearchInputKeydown(e) {
+    if (e.key !== 'Enter') return;
+    const query = normalizeSearchTerm(e.target.value);
+    clearTimeout(analyticsTimeout);
+    fetchVideos(query);
+    triggerAnalytics(query);
+}
+
+function bindSearchInputHandlers() {
+    const searchInput = document.getElementById('globalSearch');
+    if (!searchInput || searchInput.dataset.boundHandlers === 'true') return;
+
+    searchInput.addEventListener('focus', handleSearchInputReset);
+    searchInput.addEventListener('click', handleSearchInputReset);
+    searchInput.addEventListener('input', handleSearchInputTyping);
+    searchInput.addEventListener('keydown', handleSearchInputKeydown);
+    searchInput.dataset.boundHandlers = 'true';
+}
+
+function bindPlayerBarHandlers() {
+    const playerBar = document.getElementById('main-player-bar');
+    if (!playerBar) return;
+
+    const [nextBtn, playPauseBtn, prevBtn, favBtn, likeBtn] = playerBar.querySelectorAll('.control-btn');
+    if (nextBtn) nextBtn.onclick = playNextVideo;
+    if (playPauseBtn) playPauseBtn.onclick = togglePlayPause;
+    if (prevBtn) prevBtn.onclick = playPreviousVideo;
+    if (favBtn) favBtn.onclick = toggleCurrentPlayingFavorite;
+    if (likeBtn) likeBtn.onclick = toggleCurrentPlayingLike;
+}
+
+function restoreInteractiveHandlersAfterTabReturn() {
+    safeBindOnce(() => {
+        bindSearchInputHandlers();
+        bindPlayerBarHandlers();
+    });
+}
+
+function initYouTubePlayer() {
+    if (ytPlayer || typeof YT === 'undefined' || !YT || typeof YT.Player !== 'function') return;
+    if (!lastPlayedEncodedData) return;
+    preparePlay(lastPlayedEncodedData);
+}
+
+function restorePlayer() {
+    if (ytPlayer && typeof ytPlayer.playVideo === 'function') return;
+    initYouTubePlayer();
+}
+
+function handleTabReturn() {
+    restoreInteractiveHandlersAfterTabReturn();
+    restoreStateLight();
+    restorePlayer();
+}
+
+handleTabReturn();
+
+window.addEventListener('focus', handleTabReturn);
+window.addEventListener('pageshow', handleTabReturn);
+document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) handleTabReturn();
 });
 
 
@@ -1505,39 +1584,9 @@ window.toggleCurrentPlayingFavorite = toggleCurrentPlayingFavorite;
 window.toggleCurrentPlayingLike = toggleCurrentPlayingLike;
 window.toggleLike = toggleLike;
 
-window.playNextVideo = async function() {
-    console.log("מדלג לסרטון הבא (מתעדף המלצה חכמה)...");
-    
-    // 1. נסיון להביא המלצה חכמה (כמו בסיום סרטון)
-    try {
-        const nextVid = await fetchSmartRecommendation();
+window.playNextVideo = playNextVideo;
 
-        if (nextVid) {
-            console.log("נמצאה המלצה חכמה לדילוג:", nextVid.title);
-            const videoData = {
-                id: nextVid.id,
-                t: nextVid.title,
-                c: nextVid.channel_title,
-                cat: categoryMap[nextVid.category_id] || "כללי",
-                v: getVideoViews(nextVid),
-                l: getVideoLikes(nextVid)
-            };
-            const encoded = btoa(encodeURIComponent(JSON.stringify(videoData)));
-            preparePlay(encoded);
-            return; // מצאנו המלצה, עוצרים כאן
-        }
-    } catch (err) {
-        console.error("שגיאה בניסיון להביא המלצה חכמה בדילוג:", err);
-    }
-
-    // 2. אם הגענו לכאן, סימן שאין המלצה חכמה - עוברים לתור הרגיל
-    console.log("לא נמצאה המלצה חכמה, עובר לסרטון הבא בתור החיפוש.");
-    playNextInQueue();
-};
-
-window.playPreviousVideo = function() {
-    playPreviousVideo();
-};
+window.playPreviousVideo = playPreviousVideo;
 // פונקציית עזר לטיפול באנליטיקס כדי למנוע כפילות קוד
 // עדכון בתוך triggerAnalytics:
 function triggerAnalytics(query) {
