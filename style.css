@@ -423,7 +423,10 @@ body {
     }
     .control-btn {
         font-size: 18px;
-        margin-left: 8px;
+        margin-left: 0;
+    }
+    .player-controls {
+        gap: 6px;
     }
     .now-playing {
         display: none; /* מסתיר כותרת בנייד כדי לפנות מקום לכפתורים */
@@ -445,11 +448,13 @@ body {
 .bottom-desc::-webkit-scrollbar { width: 4px; }
 .bottom-desc::-webkit-scrollbar-thumb { background: #444; border-radius: 10px; }
 
-.player-right { width: 20%; display: flex; justify-content: flex-end; align-items: center; color: var(--spotify-green); font-weight: bold; font-size: 12px; }
+.player-right { width: 24%; min-width: 260px; display: flex; justify-content: flex-end; align-items: center; color: var(--spotify-green); font-weight: bold; font-size: 12px; }
+.player-controls { display: flex; align-items: center; flex-wrap: nowrap; white-space: nowrap; gap: 10px; }
 .control-btn {
-    background: none; border: none; color: white; cursor: pointer; font-size: 20px; transition: 0.2s; margin-left: 15px;
+    background: none; border: none; color: white; cursor: pointer; font-size: 20px; transition: 0.2s; margin-left: 0;
 }
 .control-btn:hover { color: var(--spotify-green); transform: scale(1.1); }
+.liked-active { color: #3b82f6; }
 
 /* --- Modals --- */
 .modal-overlay {
