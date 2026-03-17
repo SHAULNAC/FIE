@@ -1423,38 +1423,63 @@ if (contentArea) {
     });
 }
 
-const searchInput = document.getElementById('globalSearch');
-
-searchInput.addEventListener('focus', () => {
-    if (!searchInput.value) return;
+function handleSearchInputReset() {
+    const searchInput = document.getElementById('globalSearch');
+    if (!searchInput || !searchInput.value) return;
     searchInput.value = '';
     clearTimeout(analyticsTimeout);
     fetchVideos('');
-});
+}
 
-searchInput.addEventListener('click', () => {
-    if (!searchInput.value) return;
-    searchInput.value = '';
-    clearTimeout(analyticsTimeout);
-    fetchVideos('');
-});
-
-// אירוע הקלדה (Input) - חיפוש מיידי בכל שינוי, ללא השהיה
-searchInput.addEventListener('input', (e) => {
+function handleSearchInputTyping(e) {
     const query = normalizeSearchTerm(e.target.value);
     clearTimeout(analyticsTimeout);
     fetchVideos(query);
     triggerAnalytics(query);
-});
+}
 
-// אירוע מקלדת (Keydown) - אנטר שומר על אותה התנהגות מיידית
-searchInput.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') {
-        const query = normalizeSearchTerm(e.target.value);
-        clearTimeout(analyticsTimeout);
-        fetchVideos(query);
-        triggerAnalytics(query);
-    }
+function handleSearchInputKeydown(e) {
+    if (e.key !== 'Enter') return;
+    const query = normalizeSearchTerm(e.target.value);
+    clearTimeout(analyticsTimeout);
+    fetchVideos(query);
+    triggerAnalytics(query);
+}
+
+function bindSearchInputHandlers() {
+    const searchInput = document.getElementById('globalSearch');
+    if (!searchInput || searchInput.dataset.boundHandlers === 'true') return;
+
+    searchInput.addEventListener('focus', handleSearchInputReset);
+    searchInput.addEventListener('click', handleSearchInputReset);
+    searchInput.addEventListener('input', handleSearchInputTyping);
+    searchInput.addEventListener('keydown', handleSearchInputKeydown);
+    searchInput.dataset.boundHandlers = 'true';
+}
+
+function bindPlayerBarHandlers() {
+    const playerBar = document.getElementById('main-player-bar');
+    if (!playerBar) return;
+
+    const [nextBtn, playPauseBtn, prevBtn, favBtn, likeBtn] = playerBar.querySelectorAll('.control-btn');
+    if (nextBtn) nextBtn.onclick = playNextVideo;
+    if (playPauseBtn) playPauseBtn.onclick = togglePlayPause;
+    if (prevBtn) prevBtn.onclick = playPreviousVideo;
+    if (favBtn) favBtn.onclick = toggleCurrentPlayingFavorite;
+    if (likeBtn) likeBtn.onclick = toggleCurrentPlayingLike;
+}
+
+function restoreInteractiveHandlersAfterTabReturn() {
+    bindSearchInputHandlers();
+    bindPlayerBarHandlers();
+}
+
+restoreInteractiveHandlersAfterTabReturn();
+
+window.addEventListener('focus', restoreInteractiveHandlersAfterTabReturn);
+window.addEventListener('pageshow', restoreInteractiveHandlersAfterTabReturn);
+document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) restoreInteractiveHandlersAfterTabReturn();
 });
 
 
