@@ -5,14 +5,16 @@ const client = supabase.createClient(SB_URL, SB_KEY);
 let currentUser = null;
 let analyticsTimeout = null; 
 let userFavorites = [];
-let debounceTimeout = null;
+let userLikedVideos = [];
 let isPlaying = false;
 let loadedVideosCount = 0;
 const VIDEOS_PER_PAGE = 50; 
 let isLoadingVideos = false;
 let hasMoreVideos = true;
 let currentSearchQuery = ""; 
+let currentResolvedSearchQuery = "";
 let currentSearchToken = 0;
+let activeSearchAbortController = null;
 let channelMatchResults = [];
 let pinnedSearchResults = null;
 let playbackMode = 'playlist'; // 'playlist' | 'smart'
@@ -27,6 +29,8 @@ let currentAppMode = 'home'; // יכול להיות 'home', 'history', או 'fav
 let ytPlayer = null;
 let currentPlayingId = null;
 let safetyTimer = null;
+let playbackEngagementTimer = null;
+let playbackSessionToken = 0;
 let lastPlayedEncodedData = null;
 const TRANSLATION_TABLE = 'translation_cache'; // שם הטבלה ב-Supabase
 const COL_ORIGINAL = 'original_text';     // שם העמודה של הטקסט המקורי
@@ -248,8 +252,8 @@ function playVideoFromObject(vid) {
         t: vid.title,
         c: vid.channel_title,
         cat: categoryMap[vid.category_id] || "כללי",
-        v: vid.views_count,
-        l: vid.likes_count
+        v: getVideoViews(vid),
+        l: getVideoLikes(vid)
     };
     const encoded = btoa(encodeURIComponent(JSON.stringify(videoData)));
     preparePlay(encoded);
@@ -262,20 +266,39 @@ async function init() {
         const { data: { user } } = await client.auth.getUser();
         currentUser = user;
         
-        client.auth.onAuthStateChange((event, session) => {
+        client.auth.onAuthStateChange(async (event, session) => {
             currentUser = session?.user || null;
             updateUserUI();
-            if (currentUser) loadSidebarLists();
+
+            if (currentUser) {
+                const [{ data: favs }, { data: likes }] = await Promise.all([
+                    client.from('favorites').select('video_id').eq('user_id', currentUser.id),
+                    client.from('video_likes').select('video_id').eq('user_id', currentUser.id)
+                ]);
+                userFavorites = favs ? favs.map(f => f.video_id) : [];
+                userLikedVideos = likes ? likes.map(l => l.video_id) : [];
+                loadSidebarLists();
+            } else {
+                userFavorites = [];
+                userLikedVideos = [];
+            }
+
+            updatePlayerBarFavoriteButton();
+            updatePlayerBarLikeButton();
         });
 
         updateUserUI();
         
         if (currentUser) {
-            const { data: favs } = await client.from('favorites')
-                .select('video_id')
-                .eq('user_id', currentUser.id);
+            const [{ data: favs }, { data: likes }] = await Promise.all([
+                client.from('favorites').select('video_id').eq('user_id', currentUser.id),
+                client.from('video_likes').select('video_id').eq('user_id', currentUser.id)
+            ]);
             userFavorites = favs ? favs.map(f => f.video_id) : [];
+            userLikedVideos = likes ? likes.map(l => l.video_id) : [];
             loadSidebarLists();
+            updatePlayerBarFavoriteButton();
+            updatePlayerBarLikeButton();
         }
 
         if (savedState?.playbackMode || typeof savedState?.isSearchPlaybackPinned === 'boolean') {
@@ -361,128 +384,181 @@ function normalizeChannelKey(text) {
     return normalized;
 }
 
-function createChannelSearchVariants(text) {
-    const normalized = normalizeSearchTerm(text);
-    const variants = new Set([normalized]);
-    const withoutVav = normalized.replace(/ו/g, '');
-    if (withoutVav) variants.add(withoutVav);
-    const latinOnly = normalized.match(/[A-Za-z0-9 ]+/g)?.join(' ').trim();
-    if (latinOnly) variants.add(latinOnly);
-    return [...variants].filter(Boolean);
+function getVideoViews(video) {
+    return video?.views_count ?? video?.views ?? 0;
 }
 
-function createTranslatedSearchVariants(text) {
-    const normalized = normalizeSearchTerm(text);
-    if (!normalized) return [];
-    const chunks = normalized
-        .split(/[|,/]/)
-        .map((part) => part.trim())
-        .filter(Boolean);
-
-    const expanded = new Set();
-    chunks.forEach((chunk) => {
-        createChannelSearchVariants(chunk).forEach((variant) => expanded.add(variant));
-    });
-
-    createChannelSearchVariants(normalized).forEach((variant) => expanded.add(variant));
-    return [...expanded].filter(Boolean);
+function getVideoLikes(video) {
+    return video?.likes_count ?? video?.likes ?? 0;
 }
 
-function escapeForLike(text) {
-    return text.replace(/[\%_]/g, '\\$&');
+function updatePlayerBarFavoriteButton(videoId = currentPlayingId) {
+    const icon = document.getElementById('playerbar-fav-icon');
+    const btn = document.getElementById('playerbar-fav-btn');
+    if (!icon || !btn) return;
+
+    const hasVideo = Boolean(videoId);
+    const isFav = hasVideo && userFavorites.includes(videoId);
+    icon.className = isFav ? 'fa-solid fa-heart' : 'fa-regular fa-heart';
+    btn.title = isFav ? 'הסר ממועדפים' : 'הוסף למועדפים';
+    btn.setAttribute('aria-label', btn.title);
+    btn.disabled = !hasVideo;
 }
 
-async function detectChannelMatches(query) {
-    const normalized = normalizeSearchTerm(query);
-    if (!normalized || normalized.length < 2) return [];
+function updatePlayerBarLikeButton(videoId = currentPlayingId) {
+    const icon = document.getElementById('playerbar-like-icon');
+    const btn = document.getElementById('playerbar-like-btn');
+    if (!icon || !btn) return;
 
-    try {
-        const translated = await getTranslationWithDB(normalized);
+    const hasVideo = Boolean(videoId);
+    const isLiked = hasVideo && userLikedVideos.includes(videoId);
+    icon.className = isLiked ? 'fa-solid fa-thumbs-up liked-active' : 'fa-regular fa-thumbs-up';
+    btn.title = isLiked ? 'הסר לייק' : 'תן לייק';
+    btn.setAttribute('aria-label', btn.title);
+    btn.disabled = !hasVideo;
+}
 
-        const allVariants = new Set(createTranslatedSearchVariants(normalized));
-        if (translated && translated.toLowerCase() !== normalized.toLowerCase()) {
-            createTranslatedSearchVariants(translated).forEach((variant) => allVariants.add(variant));
-        }
+function schedulePlaybackEngagement(videoId, sessionToken) {
+    clearTimeout(playbackEngagementTimer);
 
-        const variants = [...allVariants].map((v) => escapeForLike(v)).filter(Boolean);
-        if (variants.length === 0) return [];
+    playbackEngagementTimer = setTimeout(async () => {
+        if (sessionToken !== playbackSessionToken || currentPlayingId !== videoId) return;
 
-        const orQuery = variants.map((v) => `channel_title.ilike.%${v}%`).join(',');
+        try {
+            const { data: existing } = await client
+                .from('videos')
+                .select('views')
+                .eq('id', videoId)
+                .single();
 
-        const { data, error } = await client
-            .from('videos')
-            .select('channel_title, thumbnail')
-            .or(orQuery)
-            .limit(300);
+            const nextViews = (existing?.views || 0) + 1;
+            await client.from('videos').update({ views: nextViews }).eq('id', videoId);
 
-        if (error) {
-            console.warn('Channel detection failed:', error.message);
-            return [];
-        }
-
-        const channelsMap = new Map();
-        for (const row of (data || [])) {
-            if (!row.channel_title) continue;
-            const key = normalizeChannelKey(row.channel_title);
-            if (!channelsMap.has(key)) {
-                channelsMap.set(key, {
-                    name: row.channel_title,
-                    thumbnail: row.thumbnail || '',
-                    sampleCount: 0
-                });
+            if (sessionToken === playbackSessionToken && currentPlayingId === videoId) {
+                const statViews = document.getElementById('stat-views');
+                if (statViews) statViews.innerHTML = `<i class="fa-solid fa-eye"></i> ${nextViews}`;
             }
-            channelsMap.get(key).sampleCount += 1;
-            if (!channelsMap.get(key).thumbnail && row.thumbnail) {
-                channelsMap.get(key).thumbnail = row.thumbnail;
-            }
+        } catch (err) {
+            console.warn('View counter update failed:', err);
         }
 
-        const names = [...channelsMap.values()];
-        if (names.length === 0) return [];
-
-        const rankingQueries = [normalized];
-        if (translated && translated.toLowerCase() !== normalized.toLowerCase()) {
-            rankingQueries.push(translated);
-        }
-
-        const scored = names
-            .map((channel) => {
-                const n = channel.name.toLowerCase();
-                const nKey = normalizeChannelKey(channel.name);
-                let score = 0;
-
-                rankingQueries.forEach((rq) => {
-                    const q = rq.toLowerCase();
-                    const qKey = normalizeChannelKey(rq);
-                    const words = q.split(' ').filter(Boolean);
-                    const keyWords = qKey.split(' ').filter(Boolean);
-
-                    if (n === q) score += 100;
-                    if (n.startsWith(q)) score += 70;
-                    if (n.includes(q)) score += 40;
-                    if (nKey === qKey) score += 100;
-                    if (nKey.startsWith(qKey)) score += 65;
-                    if (nKey.includes(qKey)) score += 45;
-
-                    const covered = words.filter((w) => n.includes(w)).length;
-                    const coveredKey = keyWords.filter((w) => nKey.includes(w)).length;
-                    score += covered * 8;
-                    score += coveredKey * 10;
+        if (currentUser && sessionToken === playbackSessionToken && currentPlayingId === videoId) {
+            client.from('history')
+                .upsert(
+                    {
+                        user_id: currentUser.id,
+                        video_id: videoId,
+                        created_at: new Date().toISOString()
+                    },
+                    { onConflict: 'user_id,video_id' }
+                )
+                .then(({ error }) => {
+                    if (error) console.error('שגיאה בעדכון היסטוריה:', error.message);
+                    if (typeof loadSidebarLists === 'function') loadSidebarLists();
                 });
+        }
+    }, 30000);
+}
 
-                score += Math.min(channel.sampleCount, 10);
-                return { ...channel, score };
-            })
-            .filter((item) => item.score >= 40)
-            .sort((a, b) => b.score - a.score)
-            .slice(0, 12);
+function toggleCurrentPlayingFavorite() {
+    if (!currentPlayingId) return;
+    toggleFavorite(currentPlayingId);
+}
 
-        return scored;
-    } catch (err) {
-        console.warn('Channel detection error:', err);
+async function toggleLike(videoId) {
+    if (!currentUser) {
+        showCustomAlert(
+            'רוצה לעשות לייק?',
+            'התחבר עכשיו בחינם כדי לסמן לייקים ולעזור לנו לדרג טוב יותר את הסרטונים עבורך!',
+            'התחבר עם Google',
+            login
+        );
+        return;
     }
 
-    return [];
+    const isLiked = userLikedVideos.includes(videoId);
+    if (isLiked) {
+        await client.from('video_likes').delete().eq('user_id', currentUser.id).eq('video_id', videoId);
+        userLikedVideos = userLikedVideos.filter(id => id !== videoId);
+    } else {
+        await client.from('video_likes').insert([{ user_id: currentUser.id, video_id: videoId }]);
+        userLikedVideos.push(videoId);
+    }
+
+    const icon = document.getElementById(`like-icon-${videoId}`);
+    if (icon) icon.className = userLikedVideos.includes(videoId) ? 'fa-solid fa-thumbs-up liked-active' : 'fa-regular fa-thumbs-up';
+    updatePlayerBarLikeButton();
+}
+
+function toggleCurrentPlayingLike() {
+    if (!currentPlayingId) return;
+    toggleLike(currentPlayingId);
+}
+
+function detectChannelMatchesFromResults(videos, queries) {
+    const queryList = (Array.isArray(queries) ? queries : [queries])
+        .map((q) => normalizeSearchTerm(q))
+        .filter((q) => q && q.length >= 2);
+
+    if (queryList.length === 0 || !Array.isArray(videos) || videos.length === 0) return [];
+
+    const channelsMap = new Map();
+    for (const row of videos) {
+        if (!row?.channel_title) continue;
+        const key = normalizeChannelKey(row.channel_title);
+        if (!channelsMap.has(key)) {
+            channelsMap.set(key, {
+                name: row.channel_title,
+                thumbnail: row.thumbnail || '',
+                sampleCount: 0
+            });
+        }
+        channelsMap.get(key).sampleCount += 1;
+        if (!channelsMap.get(key).thumbnail && row.thumbnail) {
+            channelsMap.get(key).thumbnail = row.thumbnail;
+        }
+    }
+
+    const names = [...channelsMap.values()];
+    if (names.length === 0) return [];
+
+    const normalizedQueries = queryList.map((q) => ({
+        text: q.toLowerCase(),
+        key: normalizeChannelKey(q),
+        words: q.toLowerCase().split(' ').filter(Boolean),
+        keyWords: normalizeChannelKey(q).split(' ').filter(Boolean)
+    }));
+
+    return names
+        .map((channel) => {
+            const n = channel.name.toLowerCase();
+            const nKey = normalizeChannelKey(channel.name);
+            let bestScore = 0;
+
+            normalizedQueries.forEach((rq) => {
+                let score = 0;
+
+                if (n === rq.text) score += 100;
+                if (n.startsWith(rq.text)) score += 70;
+                if (n.includes(rq.text)) score += 40;
+                if (nKey === rq.key) score += 100;
+                if (nKey.startsWith(rq.key)) score += 65;
+                if (nKey.includes(rq.key)) score += 45;
+
+                const covered = rq.words.filter((w) => n.includes(w)).length;
+                const coveredKey = rq.keyWords.filter((w) => nKey.includes(w)).length;
+                score += covered * 8;
+                score += coveredKey * 10;
+
+                if (score > bestScore) bestScore = score;
+            });
+
+            const finalScore = bestScore + Math.min(channel.sampleCount, 10);
+            return { ...channel, score: finalScore };
+        })
+        .filter((item) => item.score >= 40)
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 12);
 }
 
 
@@ -564,13 +640,18 @@ function renderSearchControls() {
 
 
 async function fetchVideos(query = "", isAppend = false, options = {}) {
-    if (isLoadingVideos) return;
+    if (isLoadingVideos && isAppend) return;
     currentAppMode = 'home';
     
     const preserveChannelFilter = Boolean(options.preserveChannelFilter);
 
     if (!isAppend) {
+        if (activeSearchAbortController) {
+            activeSearchAbortController.abort();
+            activeSearchAbortController = null;
+        }
         currentSearchQuery = normalizeSearchTerm(query);
+        currentResolvedSearchQuery = "";
         loadedVideosCount = 0;
         hasMoreVideos = true;
         if (!preserveChannelFilter) {
@@ -606,31 +687,61 @@ async function fetchVideos(query = "", isAppend = false, options = {}) {
     } else {
         // חיפוש טקסט חופשי
         const cleanQuery = currentSearchQuery.replace(/[^\w\sא-ת]/g, ' ').trim();
-        const { data } = await client.rpc('search_videos_prioritized', { search_term: cleanQuery })
-            .range(from, to);
-        fetchedData = data || [];
 
-        if (!isAppend) {
-            // זיהוי ערוצים ראשוני לפי השאילתה המקורית
-            channelMatchResults = await detectChannelMatches(cleanQuery);
+        if (!cleanQuery) {
+            fetchedData = [];
+        } else {
+            if (!isAppend || !currentResolvedSearchQuery) {
+                const cachedTranslation = await getCachedTranslation(cleanQuery);
 
-            clearTimeout(debounceTimeout);
-            debounceTimeout = setTimeout(async () => {
-                if (searchToken !== currentSearchToken || currentChannelFilter) return;
+                if (searchToken !== currentSearchToken || currentChannelFilter) {
+                    isLoadingVideos = false;
+                    return;
+                }
 
-                const translated = await getTranslationWithDB(cleanQuery);
-                if (translated && translated.toLowerCase() !== cleanQuery.toLowerCase()) {
-                    // חיפוש סרטונים לפי התרגום
-                    const { data: transData } = await client.rpc('search_videos_prioritized', { search_term: translated })
-                        .range(0, VIDEOS_PER_PAGE - 1);
+                if (cachedTranslation && cachedTranslation.trim()) {
+                    currentResolvedSearchQuery = `${cleanQuery} ${cachedTranslation.trim()}`;
+                } else {
+                    const searchAbortController = new AbortController();
+                    activeSearchAbortController = searchAbortController;
 
-                    if (searchToken !== currentSearchToken || currentChannelFilter) return;
+                    const translated = await requestTranslationAndCache(cleanQuery, searchAbortController.signal);
+                    if (activeSearchAbortController === searchAbortController) activeSearchAbortController = null;
 
-                    if (transData && transData.length > 0) {
-                        renderVideoGrid(transData, true);
+                    if (searchToken !== currentSearchToken || currentChannelFilter) {
+                        isLoadingVideos = false;
+                        return;
+                    }
+
+                    if (translated && translated.trim()) {
+                        currentResolvedSearchQuery = `${cleanQuery} ${translated.trim()}`;
+                    } else {
+                        currentResolvedSearchQuery = cleanQuery;
                     }
                 }
-            }, 800);
+            }
+
+            if (searchToken !== currentSearchToken || currentChannelFilter) {
+                isLoadingVideos = false;
+                return;
+            }
+
+            const { data } = await client.rpc('search_videos_prioritized', { search_term: currentResolvedSearchQuery })
+            .range(from, to);
+            fetchedData = data || [];
+        }
+
+        if (!isAppend) {
+            // זיהוי ערוצים מתוך אותן תוצאות חיפוש (ללא שאילתה נוספת)
+            const resolvedQuery = normalizeSearchTerm(currentResolvedSearchQuery || '');
+            const translationOnly = resolvedQuery.startsWith(`${cleanQuery} `)
+                ? normalizeSearchTerm(resolvedQuery.slice(cleanQuery.length))
+                : '';
+            const englishOnly = normalizeSearchTerm((resolvedQuery.match(/[A-Za-z0-9 ]+/g) || []).join(' '));
+
+            const channelQueries = [cleanQuery, resolvedQuery, translationOnly, englishOnly]
+                .filter(Boolean);
+            channelMatchResults = detectChannelMatchesFromResults(fetchedData, channelQueries);
         }
     }
 
@@ -669,50 +780,62 @@ async function fetchVideos(query = "", isAppend = false, options = {}) {
     }
 }
 
-async function getTranslationWithDB(text) {
+async function getCachedTranslation(text) {
     if (!text) return null;
-    
+
     try {
-        const { data: existingTranslation, error: fetchError } = await client
+        const { data: existingTranslation } = await client
             .from(TRANSLATION_TABLE)
             .select(COL_TRANSLATED)
             .eq(COL_ORIGINAL, text)
             .single();
 
-        if (existingTranslation && existingTranslation[COL_TRANSLATED]) {
-            return existingTranslation[COL_TRANSLATED];
-        }
+        return existingTranslation && existingTranslation[COL_TRANSLATED]
+            ? existingTranslation[COL_TRANSLATED]
+            : null;
+    } catch (e) {
+        return null;
+    }
+}
 
+async function requestTranslationAndCache(text, signal) {
+    if (!text) return null;
+
+    try {
         const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=iw&tl=en&dt=t&dt=rm&q=${encodeURI(text)}`;
-        const res = await fetch(url);
+        const res = await fetch(url, { signal });
         const data = await res.json();
 
-        const translation = data[0][0][0];
-        
+        const translation = data?.[0]?.[0]?.[0] || '';
+
         let transliteration = "";
-        if (data[0][1] && (data[0][1][3] || data[0][1][2])) {
+        if (data?.[0]?.[1] && (data[0][1][3] || data[0][1][2])) {
             transliteration = data[0][1][3] || data[0][1][2];
         }
 
-        const combinedResult = transliteration 
-            ? `${translation} ${transliteration}` 
-            : translation;
+        const combinedResult = transliteration
+            ? `${translation} ${transliteration}`.trim()
+            : translation.trim();
 
         if (combinedResult && combinedResult.toLowerCase() !== text.toLowerCase()) {
-            await client.from(TRANSLATION_TABLE).insert([
-                { 
-                    [COL_ORIGINAL]: text, 
-                    [COL_TRANSLATED]: combinedResult 
+            await client.from(TRANSLATION_TABLE).upsert([
+                {
+                    [COL_ORIGINAL]: text,
+                    [COL_TRANSLATED]: combinedResult
                 }
-            ]);
+            ], { onConflict: COL_ORIGINAL });
         }
-        
-        return combinedResult;
+
+        return combinedResult || null;
     } catch (e) {
+        if (e?.name === 'AbortError') {
+            return null;
+        }
         console.error("שגיאה בתהליך התרגום והתעתיק:", e);
         return null;
     }
 }
+
 // --- רינדור ---
 
 function renderVideoGrid(videos, isAppend = false) {
@@ -742,7 +865,9 @@ function renderVideoGrid(videos, isAppend = false) {
 
         const encodedData = btoa(encodeURIComponent(JSON.stringify(videoData)));
         const isFav = userFavorites.includes(videoId);
+        const isLiked = userLikedVideos.includes(videoId);
         const favIconClass = isFav ? 'fa-solid' : 'fa-regular';
+        const likeIconClass = isLiked ? 'fa-solid liked-active' : 'fa-regular';
         const displayDuration = v.duration ? formatDuration(v.duration) : '';
 
         return `
@@ -755,9 +880,12 @@ function renderVideoGrid(videos, isAppend = false) {
                     <h3 title="${safeTitle}">${safeTitle}</h3>
                     <p>${safeChannel}</p>
                     <div class="card-footer">
-                        <span><i class="fa-solid fa-eye"></i> ${v.views_count || 0}</span>
-                        <button class="fav-btn" onclick="event.stopPropagation(); toggleFavorite('${videoId}')">
+                        <span><i class="fa-solid fa-eye"></i> ${getVideoViews(v)}</span>
+                        <button class="fav-btn" onclick="event.stopPropagation(); toggleFavorite('${videoId}')" title="מועדפים">
                             <i class="${favIconClass} fa-heart" id="fav-icon-${videoId}"></i>
+                        </button>
+                        <button class="fav-btn" onclick="event.stopPropagation(); toggleLike('${videoId}')" title="לייק">
+                            <i class="${likeIconClass} fa-thumbs-up" id="like-icon-${videoId}"></i>
                         </button>
                     </div>
                 </div>
@@ -782,8 +910,12 @@ async function preparePlay(encodedData) {
         const data = JSON.parse(decodeURIComponent(atob(encodedData)));
         lastPlayedEncodedData = encodedData;
         currentPlayingId = data.id; 
+        playbackSessionToken += 1;
         activeQueue = playbackMode === 'playlist' && pinnedSearchResults ? [...pinnedSearchResults] : [...displayResults];
         saveAppState();
+        updatePlayerBarFavoriteButton(currentPlayingId);
+        updatePlayerBarLikeButton(currentPlayingId);
+        schedulePlaybackEngagement(currentPlayingId, playbackSessionToken);
 
         // --- שליחה לגוגל אנליטיקס ---
         if (typeof gtag === 'function') {
@@ -869,8 +1001,8 @@ async function preparePlay(encodedData) {
                                     t: nextVid.title,
                                     c: nextVid.channel_title,
                                     cat: categoryMap[nextVid.category_id] || "כללי",
-                                    v: nextVid.views_count,
-                                    l: nextVid.likes_count
+                                    v: getVideoViews(nextVid),
+                                    l: getVideoLikes(nextVid)
                                 };
                                 const encoded = btoa(encodeURIComponent(JSON.stringify(videoData)));
                                 preparePlay(encoded);
@@ -901,23 +1033,6 @@ async function preparePlay(encodedData) {
             .then(({ data: extra }) => {
                 if (extra && descElem) descElem.textContent = extra.description || "אין תיאור זמין";
             });
-
-        // --- עדכון היסטוריה ---
-        if (currentUser) {
-            client.from('history')
-                .upsert(
-                    { 
-                        user_id: currentUser.id, 
-                        video_id: data.id, 
-                        created_at: new Date().toISOString() 
-                    }, 
-                    { onConflict: 'user_id,video_id' }
-                )
-                .then(({ error }) => {
-                    if (error) console.error("שגיאה בעדכון היסטוריה:", error.message);
-                    if (typeof loadSidebarLists === 'function') loadSidebarLists(); 
-                });
-        }
 
         // --- הגדרת Media Session (שלט רחוק ומסך נעילה) ---
         if ('mediaSession' in navigator) {
@@ -985,8 +1100,10 @@ async function fetchSmartRecommendation() {
                 channel_title: rec.channel_title,
                 thumbnail: rec.thumbnail,
                 duration: rec.duration,
-                views_count: rec.views_count,
-                likes_count: rec.likes_count,
+                views_count: getVideoViews(rec),
+                likes_count: getVideoLikes(rec),
+                views: getVideoViews(rec),
+                likes: getVideoLikes(rec),
                 category_id: rec.category_id
             };
         }
@@ -1024,8 +1141,8 @@ async function playNextInQueue() {
         t: nextVid.title,
         c: nextVid.channel_title,
         cat: categoryMap[nextVid.category_id] || "כללי",
-        v: nextVid.views_count,
-        l: nextVid.likes_count
+        v: getVideoViews(nextVid),
+        l: getVideoLikes(nextVid)
     };
     
     const encoded = btoa(encodeURIComponent(JSON.stringify(videoData)));
@@ -1048,9 +1165,14 @@ function closePlayer() {
     }
     
     clearTimeout(safetyTimer);
+    clearTimeout(playbackEngagementTimer);
+    playbackSessionToken += 1;
     isPlaying = false;
     updatePlayStatus(false);
+    updatePlayerBarFavoriteButton(null);
+    updatePlayerBarLikeButton(null);
 }
+
 
 function initDraggable() {
     const player = document.getElementById('floating-player');
@@ -1189,7 +1311,9 @@ async function toggleFavorite(videoId) {
     }
     const icon = document.getElementById(`fav-icon-${videoId}`);
     if (icon) icon.className = userFavorites.includes(videoId) ? 'fa-solid fa-heart' : 'fa-regular fa-heart';
+    updatePlayerBarFavoriteButton();
 }
+
 
 function showEfficiencyPoll(videoId) {
     const poll = document.createElement('div');
@@ -1299,35 +1423,35 @@ if (contentArea) {
     });
 }
 
-let searchDebounceTimeout = null;
 const searchInput = document.getElementById('globalSearch');
 
-// אירוע הקלדה (Input) - מפעיל טיימר של 1000 מילישניות
-searchInput.addEventListener('input', (e) => {
-    const query = normalizeSearchTerm(e.target.value);
-
-    // איפוס הטיימר הקודם בכל הקלדה חדשה
-    clearTimeout(searchDebounceTimeout);
+searchInput.addEventListener('focus', () => {
+    if (!searchInput.value) return;
+    searchInput.value = '';
     clearTimeout(analyticsTimeout);
-
-    // הגדרת טיימר חדש לחיפוש
-    searchDebounceTimeout = setTimeout(() => {
-        // קריאה ל-fetchVideos ללא פרמטר שני אומרת לו לרנדר מהתחלה (isAppend = false)
-        fetchVideos(query);
-        triggerAnalytics(query);
-    }, 500);
+    fetchVideos('');
 });
 
-// אירוע מקלדת (Keydown) - מזהה לחיצה על אנטר לביצוע מיידי
+searchInput.addEventListener('click', () => {
+    if (!searchInput.value) return;
+    searchInput.value = '';
+    clearTimeout(analyticsTimeout);
+    fetchVideos('');
+});
+
+// אירוע הקלדה (Input) - חיפוש מיידי בכל שינוי, ללא השהיה
+searchInput.addEventListener('input', (e) => {
+    const query = normalizeSearchTerm(e.target.value);
+    clearTimeout(analyticsTimeout);
+    fetchVideos(query);
+    triggerAnalytics(query);
+});
+
+// אירוע מקלדת (Keydown) - אנטר שומר על אותה התנהגות מיידית
 searchInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') {
         const query = normalizeSearchTerm(e.target.value);
-        
-        // ביטול הטיימר הממתין כדי שלא ירוץ החיפוש פעמיים
-        clearTimeout(searchDebounceTimeout);
         clearTimeout(analyticsTimeout);
-        
-        // הפעלה מיידית של החיפוש
         fetchVideos(query);
         triggerAnalytics(query);
     }
@@ -1377,6 +1501,9 @@ function togglePlaybackMode() {
 window.applyChannelFilter = applyChannelFilter;
 window.applyChannelFilterByName = applyChannelFilterByName;
 window.togglePlaybackMode = togglePlaybackMode;
+window.toggleCurrentPlayingFavorite = toggleCurrentPlayingFavorite;
+window.toggleCurrentPlayingLike = toggleCurrentPlayingLike;
+window.toggleLike = toggleLike;
 
 window.playNextVideo = async function() {
     console.log("מדלג לסרטון הבא (מתעדף המלצה חכמה)...");
@@ -1392,8 +1519,8 @@ window.playNextVideo = async function() {
                 t: nextVid.title,
                 c: nextVid.channel_title,
                 cat: categoryMap[nextVid.category_id] || "כללי",
-                v: nextVid.views_count,
-                l: nextVid.likes_count
+                v: getVideoViews(nextVid),
+                l: getVideoLikes(nextVid)
             };
             const encoded = btoa(encodeURIComponent(JSON.stringify(videoData)));
             preparePlay(encoded);
