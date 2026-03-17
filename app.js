@@ -195,17 +195,32 @@ function startVoiceSearch() {
     recognition.start();
 }
 
-// מעבר יזום לסרטון הבא בתור
-function playNextVideo() {
-    if (!currentPlayingId || activeQueue.length === 0) return;
-    const currentIndex = activeQueue.findIndex(v => v.id === currentPlayingId);
-    
-    if (currentIndex >= 0 && currentIndex < activeQueue.length - 1) {
-        const nextVid = activeQueue[currentIndex + 1];
-        playVideoFromObject(nextVid);
-    } else {
-        console.log("אין סרטון הבא בתור");
+// מעבר יזום לסרטון הבא (במצב smart מתעדף המלצה חכמה)
+async function playNextVideo() {
+    if (!currentPlayingId) return;
+
+    if (playbackMode === 'smart') {
+        try {
+            const nextVid = await fetchSmartRecommendation();
+            if (nextVid) {
+                const videoData = {
+                    id: nextVid.id,
+                    t: nextVid.title,
+                    c: nextVid.channel_title,
+                    cat: categoryMap[nextVid.category_id] || "כללי",
+                    v: getVideoViews(nextVid),
+                    l: getVideoLikes(nextVid)
+                };
+                const encoded = btoa(encodeURIComponent(JSON.stringify(videoData)));
+                preparePlay(encoded);
+                return;
+            }
+        } catch (err) {
+            console.error("שגיאה בניסיון להביא המלצה חכמה בדילוג:", err);
+        }
     }
+
+    await playNextInQueue();
 }
 
 // מעבר יזום לסרטון הקודם בתור
@@ -1569,39 +1584,9 @@ window.toggleCurrentPlayingFavorite = toggleCurrentPlayingFavorite;
 window.toggleCurrentPlayingLike = toggleCurrentPlayingLike;
 window.toggleLike = toggleLike;
 
-window.playNextVideo = async function() {
-    console.log("מדלג לסרטון הבא (מתעדף המלצה חכמה)...");
-    
-    // 1. נסיון להביא המלצה חכמה (כמו בסיום סרטון)
-    try {
-        const nextVid = await fetchSmartRecommendation();
+window.playNextVideo = playNextVideo;
 
-        if (nextVid) {
-            console.log("נמצאה המלצה חכמה לדילוג:", nextVid.title);
-            const videoData = {
-                id: nextVid.id,
-                t: nextVid.title,
-                c: nextVid.channel_title,
-                cat: categoryMap[nextVid.category_id] || "כללי",
-                v: getVideoViews(nextVid),
-                l: getVideoLikes(nextVid)
-            };
-            const encoded = btoa(encodeURIComponent(JSON.stringify(videoData)));
-            preparePlay(encoded);
-            return; // מצאנו המלצה, עוצרים כאן
-        }
-    } catch (err) {
-        console.error("שגיאה בניסיון להביא המלצה חכמה בדילוג:", err);
-    }
-
-    // 2. אם הגענו לכאן, סימן שאין המלצה חכמה - עוברים לתור הרגיל
-    console.log("לא נמצאה המלצה חכמה, עובר לסרטון הבא בתור החיפוש.");
-    playNextInQueue();
-};
-
-window.playPreviousVideo = function() {
-    playPreviousVideo();
-};
+window.playPreviousVideo = playPreviousVideo;
 // פונקציית עזר לטיפול באנליטיקס כדי למנוע כפילות קוד
 // עדכון בתוך triggerAnalytics:
 function triggerAnalytics(query) {
