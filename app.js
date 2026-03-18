@@ -11,9 +11,7 @@ const VIDEOS_PER_PAGE = 50;
 let isLoadingVideos = false;
 let hasMoreVideos = true;
 let currentSearchQuery = ""; 
-let currentResolvedSearchQuery = "";
 let currentSearchToken = 0;
-let activeSearchAbortController = null;
 let channelMatchResults = [];
 let pinnedSearchResults = null;
 let playbackMode = 'playlist'; // 'playlist' | 'smart'
@@ -31,9 +29,6 @@ let safetyTimer = null;
 let playbackEngagementTimer = null;
 let playbackSessionToken = 0;
 let lastPlayedEncodedData = null;
-const TRANSLATION_TABLE = 'translation_cache'; // שם הטבלה ב-Supabase
-const COL_ORIGINAL = 'original_text';     // שם העמודה של הטקסט המקורי
-const COL_TRANSLATED = 'translated_text'; // שם העמודה של הטקסט המתורגם
 
 const APP_STATE_STORAGE_KEY = 'fie:last-app-state';
 
@@ -574,12 +569,7 @@ async function fetchVideos(query = "", isAppend = false, options = {}) {
     const preserveChannelFilter = Boolean(options.preserveChannelFilter);
 
     if (!isAppend) {
-        if (activeSearchAbortController) {
-            activeSearchAbortController.abort();
-            activeSearchAbortController = null;
-        }
         currentSearchQuery = normalizeSearchTerm(query);
-        currentResolvedSearchQuery = "";
         loadedVideosCount = 0;
         hasMoreVideos = true;
         if (!preserveChannelFilter) {
@@ -619,50 +609,19 @@ async function fetchVideos(query = "", isAppend = false, options = {}) {
         if (!cleanQuery) {
             fetchedData = [];
         } else {
-            if (!isAppend || !currentResolvedSearchQuery) {
-                const cachedTranslation = await getCachedTranslation(cleanQuery);
-
-                if (searchToken !== currentSearchToken || currentChannelFilter) {
-                    isLoadingVideos = false;
-                    return;
-                }
-
-                if (cachedTranslation && cachedTranslation.trim()) {
-                    currentResolvedSearchQuery = cachedTranslation.trim();
-                } else {
-                    const searchAbortController = new AbortController();
-                    activeSearchAbortController = searchAbortController;
-
-                    const translated = await requestTranslationAndCache(cleanQuery, searchAbortController.signal);
-                    if (activeSearchAbortController === searchAbortController) activeSearchAbortController = null;
-
-                    if (searchToken !== currentSearchToken || currentChannelFilter) {
-                        isLoadingVideos = false;
-                        return;
-                    }
-
-                    if (translated && translated.trim()) {
-                        currentResolvedSearchQuery = `${cleanQuery} ${translated.trim()}`;
-                    } else {
-                        currentResolvedSearchQuery = cleanQuery;
-                    }
-                }
-            }
-
             if (searchToken !== currentSearchToken || currentChannelFilter) {
                 isLoadingVideos = false;
                 return;
             }
 
-            const { data } = await client.rpc('search_videos_prioritized', { search_term: currentResolvedSearchQuery })
+            const { data } = await client.rpc('search_videos_prioritized', { search_term: cleanQuery })
             .range(from, to);
             fetchedData = data || [];
         }
 
         if (!isAppend) {
             // זיהוי ערוצים מתוך אותן תוצאות חיפוש (ללא שאילתה נוספת)
-            const channelQuery = currentResolvedSearchQuery || cleanQuery;
-            channelMatchResults = detectChannelMatchesFromResults(fetchedData, channelQuery);
+            channelMatchResults = detectChannelMatchesFromResults(fetchedData, cleanQuery);
         }
     }
 
@@ -698,62 +657,6 @@ async function fetchVideos(query = "", isAppend = false, options = {}) {
             t: document.getElementById('current-title')?.textContent, 
             c: document.getElementById('current-channel')?.textContent 
         });
-    }
-}
-
-async function getCachedTranslation(text) {
-    if (!text) return null;
-
-    try {
-        const { data: existingTranslation } = await client
-            .from(TRANSLATION_TABLE)
-            .select(COL_TRANSLATED)
-            .eq(COL_ORIGINAL, text)
-            .single();
-
-        return existingTranslation && existingTranslation[COL_TRANSLATED]
-            ? existingTranslation[COL_TRANSLATED]
-            : null;
-    } catch (e) {
-        return null;
-    }
-}
-
-async function requestTranslationAndCache(text, signal) {
-    if (!text) return null;
-
-    try {
-        const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=iw&tl=en&dt=t&dt=rm&q=${encodeURI(text)}`;
-        const res = await fetch(url, { signal });
-        const data = await res.json();
-
-        const translation = data?.[0]?.[0]?.[0] || '';
-
-        let transliteration = "";
-        if (data?.[0]?.[1] && (data[0][1][3] || data[0][1][2])) {
-            transliteration = data[0][1][3] || data[0][1][2];
-        }
-
-        const combinedResult = transliteration
-            ? `${translation} ${transliteration}`.trim()
-            : translation.trim();
-
-        if (combinedResult && combinedResult.toLowerCase() !== text.toLowerCase()) {
-            await client.from(TRANSLATION_TABLE).upsert([
-                {
-                    [COL_ORIGINAL]: text,
-                    [COL_TRANSLATED]: combinedResult
-                }
-            ], { onConflict: COL_ORIGINAL });
-        }
-
-        return combinedResult || null;
-    } catch (e) {
-        if (e?.name === 'AbortError') {
-            return null;
-        }
-        console.error("שגיאה בתהליך התרגום והתעתיק:", e);
-        return null;
     }
 }
 
