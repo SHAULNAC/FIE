@@ -11,9 +11,7 @@ const VIDEOS_PER_PAGE = 50;
 let isLoadingVideos = false;
 let hasMoreVideos = true;
 let currentSearchQuery = ""; 
-let currentResolvedSearchQuery = "";
 let currentSearchToken = 0;
-let activeSearchAbortController = null;
 let channelMatchResults = [];
 let pinnedSearchResults = null;
 let playbackMode = 'playlist'; // 'playlist' | 'smart'
@@ -31,9 +29,6 @@ let safetyTimer = null;
 let playbackEngagementTimer = null;
 let playbackSessionToken = 0;
 let lastPlayedEncodedData = null;
-const TRANSLATION_TABLE = 'translation_cache'; // שם הטבלה ב-Supabase
-const COL_ORIGINAL = 'original_text';     // שם העמודה של הטקסט המקורי
-const COL_TRANSLATED = 'translated_text'; // שם העמודה של הטקסט המתורגם
 
 const APP_STATE_STORAGE_KEY = 'fie:last-app-state';
 
@@ -440,18 +435,33 @@ function detectChannelMatchesFromResults(videos, query) {
 
     const channelsMap = new Map();
     for (const row of videos) {
-        if (!row?.channel_title) continue;
-        const key = normalizeChannelKey(row.channel_title);
+        const primaryName = row?.channel_title || row?.channel_title_he;
+        if (!primaryName) continue;
+
+        const key = normalizeChannelKey(primaryName);
+        const heName = normalizeSearchTerm(row.channel_title_he || "");
+        const enName = normalizeSearchTerm(row.channel_title || "");
+
         if (!channelsMap.has(key)) {
             channelsMap.set(key, {
-                name: row.channel_title,
+                name: primaryName,
+                aliases: [],
                 thumbnail: row.thumbnail || '',
                 sampleCount: 0
             });
         }
-        channelsMap.get(key).sampleCount += 1;
-        if (!channelsMap.get(key).thumbnail && row.thumbnail) {
-            channelsMap.get(key).thumbnail = row.thumbnail;
+
+        const channel = channelsMap.get(key);
+        channel.sampleCount += 1;
+        if (!channel.thumbnail && row.thumbnail) {
+            channel.thumbnail = row.thumbnail;
+        }
+
+        if (heName && !channel.aliases.some((alias) => normalizeChannelKey(alias) === normalizeChannelKey(heName))) {
+            channel.aliases.push(heName);
+        }
+        if (enName && !channel.aliases.some((alias) => normalizeChannelKey(alias) === normalizeChannelKey(enName))) {
+            channel.aliases.push(enName);
         }
     }
 
@@ -463,23 +473,34 @@ function detectChannelMatchesFromResults(videos, query) {
 
     return names
         .map((channel) => {
-            const n = channel.name.toLowerCase();
-            const nKey = normalizeChannelKey(channel.name);
             const words = rankingQuery.split(' ').filter(Boolean);
             const keyWords = rankingQueryKey.split(' ').filter(Boolean);
+
+            const candidateNames = [channel.name, ...(channel.aliases || [])]
+                .filter(Boolean)
+                .map((name) => normalizeSearchTerm(name))
+                .filter(Boolean);
+
             let score = 0;
+            for (const candidate of candidateNames) {
+                const n = candidate.toLowerCase();
+                const nKey = normalizeChannelKey(candidate);
+                let candidateScore = 0;
 
-            if (n === rankingQuery) score += 100;
-            if (n.startsWith(rankingQuery)) score += 70;
-            if (n.includes(rankingQuery)) score += 40;
-            if (nKey === rankingQueryKey) score += 100;
-            if (nKey.startsWith(rankingQueryKey)) score += 65;
-            if (nKey.includes(rankingQueryKey)) score += 45;
+                if (n === rankingQuery) candidateScore += 100;
+                if (n.startsWith(rankingQuery)) candidateScore += 70;
+                if (n.includes(rankingQuery)) candidateScore += 40;
+                if (nKey === rankingQueryKey) candidateScore += 100;
+                if (nKey.startsWith(rankingQueryKey)) candidateScore += 65;
+                if (nKey.includes(rankingQueryKey)) candidateScore += 45;
 
-            const covered = words.filter((w) => n.includes(w)).length;
-            const coveredKey = keyWords.filter((w) => nKey.includes(w)).length;
-            score += covered * 8;
-            score += coveredKey * 10;
+                const covered = words.filter((w) => n.includes(w)).length;
+                const coveredKey = keyWords.filter((w) => nKey.includes(w)).length;
+                candidateScore += covered * 8;
+                candidateScore += coveredKey * 10;
+
+                score = Math.max(score, candidateScore);
+            }
 
             score += Math.min(channel.sampleCount, 10);
             return { ...channel, score };
@@ -574,12 +595,7 @@ async function fetchVideos(query = "", isAppend = false, options = {}) {
     const preserveChannelFilter = Boolean(options.preserveChannelFilter);
 
     if (!isAppend) {
-        if (activeSearchAbortController) {
-            activeSearchAbortController.abort();
-            activeSearchAbortController = null;
-        }
         currentSearchQuery = normalizeSearchTerm(query);
-        currentResolvedSearchQuery = "";
         loadedVideosCount = 0;
         hasMoreVideos = true;
         if (!preserveChannelFilter) {
@@ -600,15 +616,15 @@ async function fetchVideos(query = "", isAppend = false, options = {}) {
     if (currentChannelFilter) {
         // חיפוש ממוקד ערוץ
         const { data } = await client.from('videos')
-            .select('id, title, channel_title, thumbnail, duration, views, likes, category_id')
-            .ilike('channel_title', currentChannelFilter)
+            .select('id, title, channel_title, channel_title_he, thumbnail, duration, views, likes, category_id')
+            .or(`channel_title.ilike.%${currentChannelFilter}%,channel_title_he.ilike.%${currentChannelFilter}%`)
             .order('published_at', { ascending: false })
             .range(from, to);
         fetchedData = data || [];
     } else if (!currentSearchQuery) {
         // דף הבית - סרטונים אחרונים
         const { data } = await client.from('videos')
-            .select('id, title, channel_title, thumbnail, duration, views, likes, category_id')
+            .select('id, title, channel_title, channel_title_he, thumbnail, duration, views, likes, category_id')
             .order('published_at', { ascending: false })
             .range(from, to);
         fetchedData = data;
@@ -619,50 +635,19 @@ async function fetchVideos(query = "", isAppend = false, options = {}) {
         if (!cleanQuery) {
             fetchedData = [];
         } else {
-            if (!isAppend || !currentResolvedSearchQuery) {
-                const cachedTranslation = await getCachedTranslation(cleanQuery);
-
-                if (searchToken !== currentSearchToken || currentChannelFilter) {
-                    isLoadingVideos = false;
-                    return;
-                }
-
-                if (cachedTranslation && cachedTranslation.trim()) {
-                    currentResolvedSearchQuery = cachedTranslation.trim();
-                } else {
-                    const searchAbortController = new AbortController();
-                    activeSearchAbortController = searchAbortController;
-
-                    const translated = await requestTranslationAndCache(cleanQuery, searchAbortController.signal);
-                    if (activeSearchAbortController === searchAbortController) activeSearchAbortController = null;
-
-                    if (searchToken !== currentSearchToken || currentChannelFilter) {
-                        isLoadingVideos = false;
-                        return;
-                    }
-
-                    if (translated && translated.trim()) {
-                        currentResolvedSearchQuery = `${cleanQuery} ${translated.trim()}`;
-                    } else {
-                        currentResolvedSearchQuery = cleanQuery;
-                    }
-                }
-            }
-
             if (searchToken !== currentSearchToken || currentChannelFilter) {
                 isLoadingVideos = false;
                 return;
             }
 
-            const { data } = await client.rpc('search_videos_prioritized', { search_term: currentResolvedSearchQuery })
+            const { data } = await client.rpc('search_videos_prioritized', { search_term: cleanQuery })
             .range(from, to);
             fetchedData = data || [];
         }
 
         if (!isAppend) {
             // זיהוי ערוצים מתוך אותן תוצאות חיפוש (ללא שאילתה נוספת)
-            const channelQuery = currentResolvedSearchQuery || cleanQuery;
-            channelMatchResults = detectChannelMatchesFromResults(fetchedData, channelQuery);
+            channelMatchResults = detectChannelMatchesFromResults(fetchedData, cleanQuery);
         }
     }
 
@@ -698,62 +683,6 @@ async function fetchVideos(query = "", isAppend = false, options = {}) {
             t: document.getElementById('current-title')?.textContent, 
             c: document.getElementById('current-channel')?.textContent 
         });
-    }
-}
-
-async function getCachedTranslation(text) {
-    if (!text) return null;
-
-    try {
-        const { data: existingTranslation } = await client
-            .from(TRANSLATION_TABLE)
-            .select(COL_TRANSLATED)
-            .eq(COL_ORIGINAL, text)
-            .single();
-
-        return existingTranslation && existingTranslation[COL_TRANSLATED]
-            ? existingTranslation[COL_TRANSLATED]
-            : null;
-    } catch (e) {
-        return null;
-    }
-}
-
-async function requestTranslationAndCache(text, signal) {
-    if (!text) return null;
-
-    try {
-        const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=iw&tl=en&dt=t&dt=rm&q=${encodeURI(text)}`;
-        const res = await fetch(url, { signal });
-        const data = await res.json();
-
-        const translation = data?.[0]?.[0]?.[0] || '';
-
-        let transliteration = "";
-        if (data?.[0]?.[1] && (data[0][1][3] || data[0][1][2])) {
-            transliteration = data[0][1][3] || data[0][1][2];
-        }
-
-        const combinedResult = transliteration
-            ? `${translation} ${transliteration}`.trim()
-            : translation.trim();
-
-        if (combinedResult && combinedResult.toLowerCase() !== text.toLowerCase()) {
-            await client.from(TRANSLATION_TABLE).upsert([
-                {
-                    [COL_ORIGINAL]: text,
-                    [COL_TRANSLATED]: combinedResult
-                }
-            ], { onConflict: COL_ORIGINAL });
-        }
-
-        return combinedResult || null;
-    } catch (e) {
-        if (e?.name === 'AbortError') {
-            return null;
-        }
-        console.error("שגיאה בתהליך התרגום והתעתיק:", e);
-        return null;
     }
 }
 
