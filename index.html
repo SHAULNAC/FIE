@@ -66,6 +66,7 @@
                 <i class="fa-solid fa-microphone" id="voiceSearchBtn" onclick="startVoiceSearch()" title="חיפוש קולי"></i>
             </div>
         </header>
+        <div id="mini-player-slot" class="mini-player-slot"></div>
 
         <section id="gallery-container">
             <h2 id="main-title" style="margin-bottom: 20px; font-size: 24px;"></h2>
@@ -78,53 +79,61 @@
     <i class="fa-solid fa-circle-info"></i>
 </button>
 
-    <div id="floating-player" class="floating-window" style="display: none;">
-        <div class="window-header" id="drag-handle">
-            <span class="drag-dots">⋮⋮ גרירה</span>
-            <button class="close-player-btn" onclick="closePlayer()" style="background:none; border:none; color:white; cursor:pointer; position:absolute; left:10px;">
-                <i class="fa-solid fa-xmark"></i>
-            </button>
-        </div>
-        <div id="youtubePlayer"></div>
-        <div class="resizer" id="resizer"></div>
-    </div>
+    <div id="player-overlay" class="player-overlay"></div>
 
-    <footer class="player-bar hidden-player" id="main-player-bar">
-        <div class="now-playing">
-            <p id="current-title">טוען סרטון...</p>
-            <div class="video-meta-sub">
-                <span id="current-channel"></span>
-                <div class="meta-sep"></div> 
-                <span id="stat-views"><i class="fa-solid fa-eye"></i> 0</span>
-                <div class="meta-sep"></div> 
-                <span id="stat-likes"><i class="fa-solid fa-thumbs-up"></i> 0</span>
+    <div id="floating-player" class="floating-window" style="display: none;">
+        <div class="floating-main-layout">
+            <div class="video-column">
+                <div class="floating-top-actions">
+                    <button class="control-btn" id="player-fav-btn" onclick="toggleCurrentPlayingFavorite()" title="הוסף למועדפים" aria-label="הוסף למועדפים">
+                        <i id="player-fav-icon" class="fa-regular fa-heart"></i>
+                    </button>
+                    <button class="control-btn" id="player-like-btn" onclick="toggleCurrentVideoLike()" title="לייק" aria-label="לייק">
+                        <i id="player-like-icon" class="fa-regular fa-thumbs-up"></i>
+                    </button>
+                    <button class="control-btn" id="player-expand-btn" onclick="expandPlayerView()" title="הרחב נגן" aria-label="הרחב נגן">
+                        <i class="fa-solid fa-up-right-and-down-left-from-center"></i>
+                    </button>
+                    <button class="control-btn close-player-btn" onclick="closePlayer()" title="סגור">
+                        <i class="fa-solid fa-xmark"></i>
+                    </button>
+                </div>
+                <div id="youtubePlayer"></div>
+            </div>
+
+            <aside class="up-next-panel">
+                <h3>הבא בתור</h3>
+                <div id="up-next-list" class="up-next-list"></div>
+            </aside>
+        </div>
+
+        <div class="floating-meta-controls">
+            <div class="now-playing">
+                <p id="current-title">טוען סרטון...</p>
+                <div class="video-meta-sub">
+                    <span id="current-channel"></span>
+                    <div class="meta-sep"></div>
+                    <span id="stat-views"><i class="fa-solid fa-eye"></i> 0</span>
+                    <div class="meta-sep"></div>
+                    <span id="stat-likes"><i class="fa-solid fa-thumbs-up"></i> 0</span>
+                </div>
+                <div id="bottom-description" class="bottom-desc">לחץ על סרטון כדי להתחיל לצפות</div>
+            </div>
+
+            <div class="player-controls">
+                <button class="control-btn" onclick="playNextVideo()" title="סרטון הבא">
+                    <i class="fa-solid fa-forward-step"></i>
+                </button>
+                <button class="control-btn" onclick="togglePlayPause()" title="הפעל/השהה">
+                    <i id="play-icon" class="fa-solid fa-play"></i>
+                </button>
+                <button class="control-btn" onclick="playPreviousVideo()" title="סרטון קודם">
+                    <i class="fa-solid fa-backward-step"></i>
+                </button>
+                <span id="current-category" class="category-tag">כללי</span>
             </div>
         </div>
-
-        <div class="player-center">
-            <div id="bottom-description" class="bottom-desc">לחץ על סרטון כדי להתחיל לצפות</div>
-        </div>
-
-        <div class="player-right">
-            <div class="player-controls">
-    <button class="control-btn" onclick="playNextVideo()" title="סרטון הבא">
-        <i class="fa-solid fa-forward-step"></i>
-    </button>
-    
-    <button class="control-btn" onclick="togglePlayPause()" title="הפעל/השהה">
-        <i id="play-icon" class="fa-solid fa-play"></i>
-    </button>
-    <button class="control-btn" onclick="playPreviousVideo()" title="סרטון קודם">
-        <i class="fa-solid fa-backward-step"></i>
-    </button>
-    <button class="control-btn" id="playerbar-fav-btn" onclick="toggleCurrentPlayingFavorite()" title="הוסף למועדפים" aria-label="הוסף למועדפים">
-        <i id="playerbar-fav-icon" class="fa-regular fa-heart"></i>
-    </button>
-
-</div>
-            <span id="current-category" class="category-tag">כללי</span>
-        </div>
-    </footer>
+    </div>
 
     <div id="privacy-modal" class="modal-overlay">
         <div class="modal-content">

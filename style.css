@@ -204,6 +204,20 @@ body {
     animation: fadeInDown 0.6s ease-out;
 }
 
+.mini-player-slot {
+    position: sticky;
+    top: 10px;
+    z-index: 850;
+    display: flex;
+    justify-content: flex-start;
+    pointer-events: none;
+}
+
+.mini-player-slot.has-mini {
+    min-height: 220px;
+    margin-bottom: 16px;
+}
+
 .brand-centered {
     display: flex;
     flex-direction: column;
@@ -287,7 +301,7 @@ body {
 /* --- Privacy Handle (Bottom Left) --- */
 .privacy-handle {
     position: fixed;
-    bottom: 90px; /* מעל בר הנגן התחתון */
+    bottom: 20px;
     left: 20px;
     width: 45px;
     height: 45px;
@@ -364,43 +378,159 @@ body {
 .fav-btn:hover { transform: scale(1.2); }
 .fa-solid.fa-heart { color: var(--spotify-green) !important; }
 
-/* --- Floating Player --- */
+/* --- Floating Player Experience --- */
+.player-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.68);
+    z-index: 9100;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.35s ease;
+}
+
 .floating-window {
-    position: fixed; bottom: 95px; left: 20px; width: 380px; height: 260px;
-    background: #000; border-radius: 12px; overflow: hidden;
-    box-shadow: 0 10px 40px rgba(0,0,0,0.8); z-index: 9999; 
-    display: none; border: 1px solid #333; flex-direction: column;
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%) scale(0.92);
+    width: min(1180px, calc(100vw - 170px));
+    height: min(78vh, 760px);
+    background: #050505;
+    border-radius: 18px;
+    overflow: hidden;
+    box-shadow: 0 20px 70px rgba(0, 0, 0, 0.7);
+    z-index: 9200;
+    display: none;
+    border: 1px solid #2c2c2c;
+    flex-direction: column;
+    opacity: 0;
+    transition: transform 0.4s cubic-bezier(0.2, 0.9, 0.2, 1), width 0.4s ease, height 0.4s ease, top 0.4s ease, left 0.4s ease, opacity 0.25s ease;
 }
 
-.window-header { 
-    height: 35px; background: #181818; 
-    cursor: grab; 
-    display: flex; justify-content: center; align-items: center; 
-    color: #b3b3b3; font-size: 12px; position: relative;
-}
-.window-header:active { cursor: grabbing; }
-
-.close-player-btn {
-    position: absolute; left: 10px;
-    background: none; border: none; color: white;
-    cursor: pointer; font-size: 16px; transition: color 0.2s;
-}
-.close-player-btn:hover { color: var(--spotify-green); }
-
-#youtubePlayer { width: 100%; flex-grow: 1; background: #000; position: relative; }
-.resizer {
-    position: absolute; bottom: 0; left: 0; 
-    width: 15px; height: 15px; cursor: sw-resize; z-index: 10;
-    background: radial-gradient(circle at 0% 100%, var(--spotify-green) 0%, transparent 70%);
+.player-open .player-overlay {
+    opacity: 1;
+    pointer-events: auto;
 }
 
-/* --- Player Bar (Bottom) --- */
-.player-bar {
-    position: fixed; bottom: 0; left: 0; width: 100%; height: 75px;
-    background: rgba(0,0,0,0.95); border-top: 1px solid var(--border-color);
-    display: flex; align-items: center; padding: 0 25px; z-index: 10000; justify-content: space-between;
-    transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.3s, visibility 0.4s;
-    backdrop-filter: blur(10px);
+.player-open .floating-window {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+}
+
+.floating-main-layout {
+    display: grid;
+    grid-template-columns: minmax(0, 2.1fr) minmax(250px, 1fr);
+    gap: 12px;
+    padding: 14px;
+    flex: 1;
+    min-height: 0;
+}
+
+.video-column {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+}
+
+.floating-top-actions {
+    display: flex;
+    justify-content: flex-start;
+    gap: 4px;
+    margin-bottom: 8px;
+}
+
+#youtubePlayer {
+    width: 100%;
+    flex-grow: 1;
+    background: #000;
+    border-radius: 10px;
+    overflow: hidden;
+    min-height: 280px;
+}
+
+.up-next-panel {
+    border: 1px solid #2f2f2f;
+    border-radius: 10px;
+    background: #131313;
+    padding: 10px;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+}
+
+.up-next-panel h3 {
+    margin: 0 0 10px;
+    font-size: 16px;
+}
+
+.up-next-list {
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-height: 0;
+}
+
+.up-next-item {
+    display: flex;
+    gap: 10px;
+    border: 1px solid transparent;
+    border-radius: 8px;
+    background: #1b1b1b;
+    padding: 8px;
+    cursor: pointer;
+    transition: background 0.2s, border-color 0.2s;
+}
+
+.up-next-item:hover,
+.up-next-item.active {
+    background: #222f31;
+    border-color: var(--spotify-green);
+}
+
+.up-next-thumb {
+    width: 110px;
+    flex-shrink: 0;
+    aspect-ratio: 16/9;
+    border-radius: 6px;
+    overflow: hidden;
+}
+
+.up-next-thumb img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.up-next-info {
+    min-width: 0;
+}
+
+.up-next-info strong,
+.up-next-info p {
+    display: block;
+    margin: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.up-next-info strong { font-size: 13px; margin-bottom: 4px; }
+.up-next-info p { font-size: 12px; color: var(--text-dim); }
+
+.floating-meta-controls {
+    border-top: 1px solid #2b2b2b;
+    background: rgba(14, 14, 14, 0.92);
+    padding: 12px 16px;
+    display: flex;
+    justify-content: space-between;
+    gap: 14px;
+}
+
+.floating-meta-controls .now-playing {
+    width: auto;
+    flex: 1;
 }
 #current-title {
     font-weight: bold;
@@ -415,41 +545,97 @@ body {
     line-height: 1.2;
 }
 
-/* התאמה לרספונסיביות של כפתורי השליטה */
-@media (max-width: 768px) {
-    .player-center {
-        max-width: 70%;
-        padding: 0 10px;
-    }
-    .control-btn {
-        font-size: 18px;
-        margin-left: 8px;
-    }
-    .now-playing {
-        display: none; /* מסתיר כותרת בנייד כדי לפנות מקום לכפתורים */
-    }
-}
-
-.player-bar.hidden-player { visibility: hidden; transform: translateY(100%); opacity: 0; pointer-events: none; }
-.player-bar.show-player { visibility: visible; transform: translateY(0); opacity: 1; pointer-events: auto; }
-
 .now-playing { width: 25%; display: flex; flex-direction: column; }
-#current-title { font-weight: bold; font-size: 14px; color: white; margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .video-meta-sub { font-size: 11px; color: var(--text-dim); margin-top: 3px; display: flex; align-items: center; gap: 8px; }
 
-.player-center { flex-grow: 1; display: flex; justify-content: center; align-items: center; padding: 0 30px; max-width: 50%; height: 100%; }
 .bottom-desc { 
-    font-size: 11.5px; color: var(--text-dim); text-align: center; 
-    max-height: 50px; overflow-y: auto; line-height: 1.4; padding: 0 5px;
+    font-size: 11.5px; color: var(--text-dim); text-align: right; 
+    max-height: 56px; overflow-y: auto; line-height: 1.4; padding: 3px 0;
+    margin-top: 8px;
 }
 .bottom-desc::-webkit-scrollbar { width: 4px; }
 .bottom-desc::-webkit-scrollbar-thumb { background: #444; border-radius: 10px; }
 
-.player-right { width: 20%; display: flex; justify-content: flex-end; align-items: center; color: var(--spotify-green); font-weight: bold; font-size: 12px; }
+.player-controls { display: flex; align-items: center; gap: 6px; }
 .control-btn {
     background: none; border: none; color: white; cursor: pointer; font-size: 20px; transition: 0.2s; margin-left: 15px;
 }
 .control-btn:hover { color: var(--spotify-green); transform: scale(1.1); }
+.control-btn.is-active { color: var(--spotify-green); }
+
+.floating-window.is-mini {
+    position: fixed;
+    top: var(--mini-top, 110px);
+    right: var(--mini-right, 90px);
+    left: var(--mini-left, auto);
+    width: 360px;
+    max-width: min(100%, 360px);
+    height: 220px;
+    transform: none;
+    opacity: 1;
+    z-index: 9050;
+    box-shadow: 0 14px 35px rgba(0, 0, 0, 0.55);
+    pointer-events: auto;
+}
+
+.floating-window.is-mini .floating-main-layout {
+    padding: 0;
+    grid-template-columns: 1fr;
+    height: 100%;
+}
+
+.floating-window.is-mini .video-column {
+    height: 100%;
+}
+
+.floating-window.is-mini .floating-top-actions {
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    z-index: 4;
+    background: rgba(0,0,0,0.5);
+    border-radius: 999px;
+}
+
+.floating-window.is-mini #youtubePlayer {
+    border-radius: 0;
+    min-height: 0;
+    height: 100%;
+    flex: 1 1 auto;
+}
+
+.floating-window.is-mini .up-next-panel,
+.floating-window.is-mini .floating-meta-controls {
+    display: none;
+}
+
+@media (max-width: 980px) {
+    .floating-window {
+        width: calc(100vw - 32px);
+        left: 16px;
+        top: 70px;
+        height: calc(100vh - 90px);
+        transform: none;
+    }
+
+    .player-open .floating-window {
+        transform: none;
+    }
+
+    .floating-main-layout {
+        grid-template-columns: 1fr;
+    }
+
+    .floating-window.is-mini {
+        width: min(320px, calc(100vw - 24px));
+        height: 180px;
+        max-width: 100%;
+    }
+
+    .mini-player-slot.has-mini {
+        min-height: 185px;
+    }
+}
 
 /* --- Modals --- */
 .modal-overlay {
