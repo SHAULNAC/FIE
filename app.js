@@ -924,31 +924,7 @@ function renderUpNextList() {
         return;
     }
 
-    list.innerHTML = upNextRecommendations.map((video) => {
-        const safeTitle = escapeHtml(video.title || 'ללא כותרת');
-        const safeChannel = escapeHtml(video.channel_title || '');
-        const safeThumb = escapeHtml(video.thumbnail || '');
-        const activeClass = video.id === currentPlayingId ? 'active' : '';
-        const videoData = {
-            id: video.id,
-            t: video.title,
-            c: video.channel_title,
-            cat: categoryMap[video.category_id] || "כללי",
-            v: getVideoViews(video),
-            l: getVideoLikes(video),
-            duration: video.duration
-        };
-        const encodedData = btoa(encodeURIComponent(JSON.stringify(videoData)));
-        return `
-            <div class="up-next-item ${activeClass}" onclick="preparePlay('${encodedData}')">
-                <div class="up-next-thumb"><img src="${safeThumb}" alt="${safeTitle}" loading="lazy"></div>
-                <div class="up-next-info">
-                    <strong>${safeTitle}</strong>
-                    <p>${safeChannel}</p>
-                </div>
-            </div>
-        `;
-    }).join('');
+    list.innerHTML = upNextRecommendations.map(buildUpNextItemHtml).join('');
 }
 
 function buildUpNextItemHtml(video) {
@@ -974,8 +950,20 @@ function buildUpNextItemHtml(video) {
                 <strong>${safeTitle}</strong>
                 <p>${safeChannel}</p>
             </div>
+            <button class="up-next-remove-btn" onclick="removeUpNextVideo('${video.id}', event)" title="הסר מהבא בתור" aria-label="הסר מהבא בתור">
+                <i class="fa-solid fa-xmark"></i>
+            </button>
         </div>
     `;
+}
+
+function removeUpNextVideo(videoId, event) {
+    if (event) {
+        event.preventDefault();
+        event.stopPropagation();
+    }
+    upNextRecommendations = upNextRecommendations.filter((v) => v.id !== videoId);
+    renderUpNextList();
 }
 
 async function fetchUpNextRecommendations() {
@@ -1249,7 +1237,8 @@ async function preparePlay(encodedData) {
                 if (extra && descElem) descElem.textContent = extra.description || "אין תיאור זמין";
             });
 
-        if (!upNextRecommendations.length) {
+        const existsInUpNextQueue = upNextRecommendations.some((video) => video.id === data.id);
+        if (!upNextRecommendations.length || !existsInUpNextQueue) {
             await fetchUpNextRecommendations();
         } else {
             renderUpNextList();

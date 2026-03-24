@@ -483,6 +483,29 @@ body {
     transition: background 0.2s, border-color 0.2s;
 }
 
+.up-next-remove-btn {
+    margin-right: auto;
+    align-self: flex-start;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    border: 1px solid #3a3a3a;
+    background: #161616;
+    color: #bdbdbd;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    transition: color 0.2s ease, border-color 0.2s ease, background 0.2s ease;
+}
+
+.up-next-remove-btn:hover {
+    color: #fff;
+    border-color: #6d6d6d;
+    background: #2a2a2a;
+}
+
 .up-next-item:hover,
 .up-next-item.active {
     background: #222f31;
