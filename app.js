@@ -751,11 +751,25 @@ function renderVideoGrid(videos, isAppend = false) {
 function setPlayerMode(miniMode) {
     const player = document.getElementById('floating-player');
     const body = document.body;
-    if (!player || !body) return;
+    const miniSlot = document.getElementById('mini-player-slot');
+    if (!player || !body || !miniSlot) return;
 
     isMiniPlayerMode = miniMode;
     player.classList.toggle('is-mini', miniMode);
-    body.classList.toggle('player-open', !miniMode && player.style.display === 'flex');
+
+    if (miniMode) {
+        if (player.parentElement !== miniSlot) {
+            miniSlot.appendChild(player);
+        }
+        miniSlot.classList.add('has-mini');
+        body.classList.remove('player-open');
+    } else {
+        if (player.parentElement !== body) {
+            body.appendChild(player);
+        }
+        miniSlot.classList.remove('has-mini');
+        body.classList.toggle('player-open', player.style.display === 'flex');
+    }
 }
 
 function renderUpNextList() {
@@ -837,7 +851,6 @@ async function fetchUpNextRecommendations() {
 function initPlayerInteractions() {
     const overlay = document.getElementById('player-overlay');
     const player = document.getElementById('floating-player');
-    const content = document.querySelector('.content');
     const upNextList = document.getElementById('up-next-list');
 
     if (overlay) {
@@ -850,14 +863,6 @@ function initPlayerInteractions() {
                 setPlayerMode(true);
             }
         }, { passive: false });
-    }
-
-    if (content) {
-        content.addEventListener('wheel', (event) => {
-            if (isMiniPlayerMode && event.deltaY > 0 && event.clientY < 260) {
-                setPlayerMode(false);
-            }
-        }, { passive: true });
     }
 
     if (player) {
@@ -1113,9 +1118,16 @@ async function playNextInQueue() {
 function closePlayer() {
     const playerWin = document.getElementById('floating-player');
     const body = document.body;
+    const miniSlot = document.getElementById('mini-player-slot');
     
-    if (playerWin) playerWin.style.display = 'none';
+    if (playerWin) {
+        playerWin.style.display = 'none';
+        if (playerWin.parentElement !== body) {
+            body.appendChild(playerWin);
+        }
+    }
     if (body) body.classList.remove('player-open');
+    if (miniSlot) miniSlot.classList.remove('has-mini');
     isMiniPlayerMode = false;
     upNextRecommendations = [];
     renderUpNextList();
