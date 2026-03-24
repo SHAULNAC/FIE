@@ -34,6 +34,7 @@ let isLoadingMoreRecommendations = false;
 let isMiniPlayerMode = false;
 let youtubePlayerBootstrapped = false;
 const sessionLikedVideoIds = new Set();
+const recentWatchedVideoIds = new Set();
 
 const APP_STATE_STORAGE_KEY = 'fie:last-app-state';
 const LAST_PLAYED_TIME_STORAGE_KEY = 'lastPlayedTime';
@@ -98,6 +99,36 @@ function clearSavedPlaybackData(clearAppState = true) {
         lastPlayedEncodedData = null;
         currentPlayingId = null;
         saveAppState();
+    }
+}
+
+function getThreeDaysAgoIso() {
+    const date = new Date();
+    date.setDate(date.getDate() - 3);
+    return date.toISOString();
+}
+
+function isRecentlyWatched(videoId) {
+    return recentWatchedVideoIds.has(videoId);
+}
+
+async function refreshRecentWatchedVideos() {
+    recentWatchedVideoIds.clear();
+    if (!currentUser) return;
+
+    try {
+        const { data, error } = await client
+            .from('history')
+            .select('video_id, created_at')
+            .eq('user_id', currentUser.id)
+            .gte('created_at', getThreeDaysAgoIso());
+
+        if (error) throw error;
+        (data || []).forEach((item) => {
+            if (item.video_id) recentWatchedVideoIds.add(item.video_id);
+        });
+    } catch (err) {
+        console.warn('Failed to refresh recent watched videos:', err);
     }
 }
 
@@ -350,6 +381,7 @@ async function init() {
             currentUser = session?.user || null;
             updateUserUI();
             if (currentUser) loadSidebarLists();
+            refreshRecentWatchedVideos();
             if (!currentUser && playbackMode === 'smart') {
                 playbackMode = 'playlist';
             }
@@ -367,6 +399,7 @@ async function init() {
             userFavorites = favs ? favs.map(f => f.video_id) : [];
             loadSidebarLists();
             updatePlayerBarFavoriteButton();
+            refreshRecentWatchedVideos();
         }
 
         if (savedState?.playbackMode || typeof savedState?.isSearchPlaybackPinned === 'boolean') {
@@ -516,6 +549,7 @@ function schedulePlaybackEngagement(videoId, sessionToken) {
                 )
                 .then(({ error }) => {
                     if (error) console.error('שגיאה בעדכון היסטוריה:', error.message);
+                    if (!error && videoId) recentWatchedVideoIds.add(videoId);
                     if (typeof loadSidebarLists === 'function') loadSidebarLists();
                 });
         }
@@ -1232,6 +1266,9 @@ async function preparePlay(encodedData, options = {}) {
                             if (upNextRecommendations.length && upNextRecommendations[0].id === currentPlayingId) {
                                 upNextRecommendations.shift();
                             }
+                            while (upNextRecommendations.length && isRecentlyWatched(upNextRecommendations[0].id)) {
+                                upNextRecommendations.shift();
+                            }
                             const nextVid = upNextRecommendations[0];
                             if (nextVid) {
                                 const videoData = {
@@ -1329,7 +1366,7 @@ async function fetchSmartRecommendation() {
     p_category_id: currentVid.category_id,
     p_current_tags: tagsString, 
     p_channel_title: currentVid.channel_title, // הוספת פסיק כאן
-    p_limit: 1 
+    p_limit: 20 
 });
 
         if (rpcError) {
@@ -1339,7 +1376,11 @@ async function fetchSmartRecommendation() {
 
         // בדיקה אם חזרה תוצאה
         if (recommendations && recommendations.length > 0) {
-            const rec = recommendations[0];
+            const rec = recommendations.find((item) => !isRecentlyWatched(item.id));
+            if (!rec) {
+                console.log("Smart Recommendation: all recommendations were watched in the last 3 days.");
+                return null;
+            }
             console.log("Smart Recommendation found:", rec.title);
             
             // אנחנו מוודאים שהאובייקט כולל את כל השדות שה-preparePlay צריך
@@ -1371,6 +1412,9 @@ async function playNextInQueue() {
 
     const currentIndex = activeQueue.findIndex(v => v.id === currentPlayingId);
     let potentialNextVideos = activeQueue.slice(currentIndex + 1);
+    if (playbackMode === 'smart') {
+        potentialNextVideos = potentialNextVideos.filter((video) => !isRecentlyWatched(video.id));
+    }
 
     if (potentialNextVideos.length === 0) {
         console.log("הגעת לסוף התור.");
