@@ -31,6 +31,7 @@ let playbackSessionToken = 0;
 let lastPlayedEncodedData = null;
 let upNextRecommendations = [];
 let isMiniPlayerMode = false;
+let youtubePlayerBootstrapped = false;
 
 const APP_STATE_STORAGE_KEY = 'fie:last-app-state';
 
@@ -868,12 +869,15 @@ function initPlayerInteractions() {
     const content = document.querySelector('.content');
 
     if (overlay) {
-        overlay.addEventListener('click', () => {
+        overlay.addEventListener('click', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
             if (currentPlayingId) setPlayerMode(true);
         });
         overlay.addEventListener('wheel', (event) => {
             if (event.deltaY > 0 && currentPlayingId) {
                 event.preventDefault();
+                event.stopPropagation();
                 setPlayerMode(true);
             }
         }, { passive: false });
@@ -951,7 +955,8 @@ async function preparePlay(encodedData) {
         // --- יצירת או טעינת הנגן ---
         if (ytPlayer && typeof ytPlayer.loadVideoById === 'function') {
             ytPlayer.loadVideoById(data.id);
-        } else {
+        } else if (!youtubePlayerBootstrapped) {
+            youtubePlayerBootstrapped = true;
             ytPlayer = new YT.Player('youtubePlayer', {
                 videoId: data.id,
                 host: 'https://www.youtube.com',
@@ -1005,6 +1010,8 @@ async function preparePlay(encodedData) {
                     }
                 }
             });
+        } else {
+            console.warn('Player requested before YT instance was ready; keeping active instance without remount.');
         }
 
         // --- עדכון UI ---
