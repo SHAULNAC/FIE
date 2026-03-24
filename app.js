@@ -1633,7 +1633,7 @@ function applyChannelFilterByName(encodedChannelName) {
 
 function togglePlaybackMode() {
     if (playbackMode === 'playlist' && !currentUser) {
-        showCustomAlert('נדרש להתחבר', 'מעבר למצב חכם זמין רק למשתמשים מחוברים.', 'הבנתי', null);
+        showCustomAlert('נדרש להתחבר', 'מעבר למצב חכם זמין רק למשתמשים מחוברים.', 'התחבר עם גוגל', () => login());
         return;
     }
 
