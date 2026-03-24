@@ -561,6 +561,7 @@ body {
     background: none; border: none; color: white; cursor: pointer; font-size: 20px; transition: 0.2s; margin-left: 15px;
 }
 .control-btn:hover { color: var(--spotify-green); transform: scale(1.1); }
+.control-btn.is-active { color: var(--spotify-green); }
 
 .floating-window.is-mini {
     position: fixed;

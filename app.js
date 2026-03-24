@@ -32,6 +32,7 @@ let lastPlayedEncodedData = null;
 let upNextRecommendations = [];
 let isMiniPlayerMode = false;
 let youtubePlayerBootstrapped = false;
+const sessionLikedVideoIds = new Set();
 
 const APP_STATE_STORAGE_KEY = 'fie:last-app-state';
 
@@ -429,6 +430,49 @@ function schedulePlaybackEngagement(videoId, sessionToken) {
 function toggleCurrentPlayingFavorite() {
     if (!currentPlayingId) return;
     toggleFavorite(currentPlayingId);
+}
+
+function updateLikeButtonState(videoId = currentPlayingId) {
+    const btn = document.getElementById('player-like-btn');
+    const icon = document.getElementById('player-like-icon');
+    if (!btn || !icon) return;
+
+    const isLiked = Boolean(videoId) && sessionLikedVideoIds.has(videoId);
+    icon.className = isLiked ? 'fa-solid fa-thumbs-up' : 'fa-regular fa-thumbs-up';
+    btn.classList.toggle('is-active', isLiked);
+    btn.title = isLiked ? 'בטל לייק' : 'לייק';
+}
+
+async function toggleCurrentVideoLike() {
+    if (!currentPlayingId) return;
+
+    const isLiked = sessionLikedVideoIds.has(currentPlayingId);
+    const delta = isLiked ? -1 : 1;
+
+    if (isLiked) {
+        sessionLikedVideoIds.delete(currentPlayingId);
+    } else {
+        sessionLikedVideoIds.add(currentPlayingId);
+    }
+    updateLikeButtonState(currentPlayingId);
+
+    const likesNode = document.getElementById('stat-likes');
+    const currentLikes = Number((likesNode?.textContent || '').replace(/[^\d]/g, '')) || 0;
+    const nextLikes = Math.max(currentLikes + delta, 0);
+    if (likesNode) likesNode.innerHTML = `<i class="fa-solid fa-thumbs-up"></i> ${nextLikes}`;
+
+    try {
+        const { data: existing } = await client.from('videos').select('likes').eq('id', currentPlayingId).single();
+        const dbNextLikes = Math.max((existing?.likes || 0) + delta, 0);
+        await client.from('videos').update({ likes: dbNextLikes }).eq('id', currentPlayingId);
+    } catch (err) {
+        console.warn('Like update failed:', err);
+    }
+}
+
+function expandPlayerView() {
+    if (!currentPlayingId) return;
+    setPlayerMode(false);
 }
 
 function detectChannelMatchesFromResults(videos, query) {
@@ -921,6 +965,7 @@ async function preparePlay(encodedData) {
         activeQueue = playbackMode === 'playlist' && pinnedSearchResults ? [...pinnedSearchResults] : [...displayResults];
         saveAppState();
         updatePlayerBarFavoriteButton(currentPlayingId);
+        updateLikeButtonState(currentPlayingId);
         schedulePlaybackEngagement(currentPlayingId, playbackSessionToken);
 
         // --- שליחה לגוגל אנליטיקס ---
@@ -1173,6 +1218,7 @@ function closePlayer() {
     isPlaying = false;
     updatePlayStatus(false);
     updatePlayerBarFavoriteButton(null);
+    updateLikeButtonState(null);
 }
 
 
