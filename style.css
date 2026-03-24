@@ -579,6 +579,11 @@ body {
 .floating-window.is-mini .floating-main-layout {
     padding: 0;
     grid-template-columns: 1fr;
+    height: 100%;
+}
+
+.floating-window.is-mini .video-column {
+    height: 100%;
 }
 
 .floating-window.is-mini .floating-top-actions {
@@ -592,7 +597,9 @@ body {
 
 .floating-window.is-mini #youtubePlayer {
     border-radius: 0;
-    min-height: 100%;
+    min-height: 0;
+    height: 100%;
+    flex: 1 1 auto;
 }
 
 .floating-window.is-mini .up-next-panel,
