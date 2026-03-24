@@ -656,6 +656,14 @@ body {
 .bottom-desc::-webkit-scrollbar-thumb { background: #444; border-radius: 10px; }
 
 .player-controls { display: flex; align-items: center; gap: 6px; }
+.player-mode-toggle-wrap {
+    display: flex;
+    align-items: center;
+    margin-left: 8px;
+}
+.player-mode-toggle-wrap .playback-toggle-hint {
+    display: none;
+}
 .control-btn {
     background: none; border: none; color: white; cursor: pointer; font-size: 20px; transition: 0.2s; margin-left: 15px;
 }

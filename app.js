@@ -350,6 +350,11 @@ async function init() {
             currentUser = session?.user || null;
             updateUserUI();
             if (currentUser) loadSidebarLists();
+            if (!currentUser && playbackMode === 'smart') {
+                playbackMode = 'playlist';
+            }
+            renderSearchControls();
+            renderPlayerModeToggle();
             updatePlayerBarFavoriteButton();
         });
 
@@ -366,6 +371,9 @@ async function init() {
 
         if (savedState?.playbackMode || typeof savedState?.isSearchPlaybackPinned === 'boolean') {
             playbackMode = savedState.playbackMode || (savedState.isSearchPlaybackPinned ? 'playlist' : 'smart');
+        }
+        if (playbackMode === 'smart' && !currentUser) {
+            playbackMode = 'playlist';
         }
 
         fetchVideos();
@@ -390,8 +398,10 @@ async function init() {
 
         initPlayerInteractions();
         renderSearchControls();
+        renderPlayerModeToggle();
         startPlaybackTracking();
         window.addEventListener('beforeunload', saveLastPlaybackTime);
+        window.addEventListener('popstate', handlePlaybackPopState);
 
     } catch (error) {
         console.error("Error during init:", error);
@@ -694,27 +704,33 @@ function renderSearchControls() {
         `
         : '';
 
+    controls.innerHTML = `${channelCards}
+        <div class="search-controls-top">
+            <span class="playback-mode-label">${modeLabel}</span>
+        </div>`;
+}
+
+function renderPlayerModeToggle() {
+    const wrap = document.getElementById('player-mode-toggle-wrap');
+    if (!wrap) return;
+
+    const playbackIsPlaylist = playbackMode === 'playlist';
     const modeHelpText = playbackIsPlaylist
         ? 'מצב פלייליסט: מנגן ברצף את תוצאות החיפוש הנוכחיות'
         : 'מצב חכם: בוחר עבורך סרטון מומלץ אוטומטית בסיום הניגון';
 
-    const modeToggle = `
-        <div class="search-controls-top">
-            <span class="playback-mode-label">${modeLabel}</span>
-            <div class="playback-toggle-wrap ${playbackIsPlaylist ? 'mode-playlist' : 'mode-smart'}">
-                <span class="playback-toggle-icon playback-toggle-icon-left" aria-hidden="true"><i class="fa-solid fa-list-ul"></i></span>
-                <button class="playback-toggle ${playbackIsPlaylist ? 'playlist' : 'smart'}" onclick="togglePlaybackMode()" title="${modeHelpText}" aria-label="${modeHelpText}">
-                    <span class="playback-toggle-track">
-                        <span class="playback-toggle-thumb"></span>
-                    </span>
-                </button>
-                <span class="playback-toggle-icon playback-toggle-icon-right" aria-hidden="true"><i class="fa-solid fa-wand-magic-sparkles"></i></span>
-                <span class="playback-toggle-hint">${modeHelpText}</span>
-            </div>
+    wrap.innerHTML = `
+        <div class="playback-toggle-wrap ${playbackIsPlaylist ? 'mode-playlist' : 'mode-smart'}">
+            <span class="playback-toggle-icon playback-toggle-icon-left" aria-hidden="true"><i class="fa-solid fa-list-ul"></i></span>
+            <button class="playback-toggle ${playbackIsPlaylist ? 'playlist' : 'smart'}" onclick="togglePlaybackMode()" title="${modeHelpText}" aria-label="${modeHelpText}">
+                <span class="playback-toggle-track">
+                    <span class="playback-toggle-thumb"></span>
+                </span>
+            </button>
+            <span class="playback-toggle-icon playback-toggle-icon-right" aria-hidden="true"><i class="fa-solid fa-wand-magic-sparkles"></i></span>
+            <span class="playback-toggle-hint">${modeHelpText}</span>
         </div>
     `;
-
-    controls.innerHTML = `${channelCards}${modeToggle}`;
 }
 
 
@@ -966,6 +982,24 @@ function removeUpNextVideo(videoId, event) {
     renderUpNextList();
 }
 
+function updateUrlForVideo(videoId, encodedData, replace = false) {
+    if (!videoId) return;
+    const url = new URL(window.location.href);
+    url.searchParams.set('v', videoId);
+    const state = { ...(history.state || {}), videoId, encodedData };
+    if (replace) {
+        window.history.replaceState(state, '', url);
+    } else {
+        window.history.pushState(state, '', url);
+    }
+}
+
+function handlePlaybackPopState(event) {
+    const encodedData = event.state?.encodedData;
+    if (!encodedData) return;
+    preparePlay(encodedData, { skipHistory: true });
+}
+
 async function fetchUpNextRecommendations() {
     if (!currentPlayingId) return;
 
@@ -1104,7 +1138,7 @@ function initPlayerInteractions() {
     }
 }
 
-async function preparePlay(encodedData) {
+async function preparePlay(encodedData, options = {}) {
     window.autoPlayTriggered = false;
     if (typeof safetyTimer !== 'undefined') clearTimeout(safetyTimer); 
     
@@ -1114,6 +1148,9 @@ async function preparePlay(encodedData) {
         currentPlayingId = data.id; 
         playbackSessionToken += 1;
         activeQueue = playbackMode === 'playlist' && pinnedSearchResults ? [...pinnedSearchResults] : [...displayResults];
+        if (!options.skipHistory) {
+            updateUrlForVideo(data.id, encodedData);
+        }
         saveAppState();
         updatePlayerBarFavoriteButton(currentPlayingId);
         updateLikeButtonState(currentPlayingId);
@@ -1239,6 +1276,8 @@ async function preparePlay(encodedData) {
 
         const existsInUpNextQueue = upNextRecommendations.some((video) => video.id === data.id);
         if (!upNextRecommendations.length || !existsInUpNextQueue) {
+            upNextRecommendations = [];
+            renderUpNextList();
             await fetchUpNextRecommendations();
         } else {
             renderUpNextList();
@@ -1593,9 +1632,15 @@ function applyChannelFilterByName(encodedChannelName) {
 }
 
 function togglePlaybackMode() {
+    if (playbackMode === 'playlist' && !currentUser) {
+        showCustomAlert('נדרש להתחבר', 'מעבר למצב חכם זמין רק למשתמשים מחוברים.', 'הבנתי', null);
+        return;
+    }
+
     playbackMode = playbackMode === 'playlist' ? 'smart' : 'playlist';
     pinnedSearchResults = playbackMode === 'playlist' ? [...displayResults] : null;
     renderSearchControls();
+    renderPlayerModeToggle();
     saveAppState();
 
     if (currentPlayingId) updateMediaSessionMetadata({ id: currentPlayingId, t: document.getElementById('current-title')?.textContent, c: document.getElementById('current-channel')?.textContent });
@@ -1659,6 +1704,7 @@ function triggerAnalytics(query) {
 
 
 renderSearchControls();
+renderPlayerModeToggle();
 init();
 
 window.addEventListener('unload', () => {
