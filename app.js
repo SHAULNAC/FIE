@@ -758,18 +758,31 @@ function setPlayerMode(miniMode) {
     player.classList.toggle('is-mini', miniMode);
 
     if (miniMode) {
-        if (player.parentElement !== miniSlot) {
-            miniSlot.appendChild(player);
-        }
         miniSlot.classList.add('has-mini');
         body.classList.remove('player-open');
+        updateMiniPlayerPosition();
     } else {
-        if (player.parentElement !== body) {
-            body.appendChild(player);
-        }
         miniSlot.classList.remove('has-mini');
         body.classList.toggle('player-open', player.style.display === 'flex');
+        player.style.removeProperty('--mini-top');
+        player.style.removeProperty('--mini-right');
     }
+}
+
+function updateMiniPlayerPosition() {
+    if (!isMiniPlayerMode) return;
+    const player = document.getElementById('floating-player');
+    const miniSlot = document.getElementById('mini-player-slot');
+    if (!player || !miniSlot) return;
+
+    const rect = miniSlot.getBoundingClientRect();
+    const miniWidth = player.offsetWidth || 360;
+    const rightOffset = Math.max(window.innerWidth - rect.right, 8);
+
+    player.style.setProperty('--mini-top', `${Math.max(rect.top, 8)}px`);
+    player.style.setProperty('--mini-right', `${Math.max(rightOffset, 8)}px`);
+    player.style.setProperty('--mini-left', 'auto');
+    player.style.setProperty('--mini-width', `${miniWidth}px`);
 }
 
 function renderUpNextList() {
@@ -852,6 +865,7 @@ function initPlayerInteractions() {
     const overlay = document.getElementById('player-overlay');
     const player = document.getElementById('floating-player');
     const upNextList = document.getElementById('up-next-list');
+    const content = document.querySelector('.content');
 
     if (overlay) {
         overlay.addEventListener('click', () => {
@@ -873,6 +887,16 @@ function initPlayerInteractions() {
             }
         }, { passive: false });
     }
+
+    if (content) {
+        content.addEventListener('scroll', () => {
+            if (isMiniPlayerMode) updateMiniPlayerPosition();
+        }, { passive: true });
+    }
+
+    window.addEventListener('resize', () => {
+        if (isMiniPlayerMode) updateMiniPlayerPosition();
+    });
 
     if (upNextList) {
         upNextList.addEventListener('wheel', (event) => {
@@ -1122,9 +1146,8 @@ function closePlayer() {
     
     if (playerWin) {
         playerWin.style.display = 'none';
-        if (playerWin.parentElement !== body) {
-            body.appendChild(playerWin);
-        }
+        playerWin.style.removeProperty('--mini-top');
+        playerWin.style.removeProperty('--mini-right');
     }
     if (body) body.classList.remove('player-open');
     if (miniSlot) miniSlot.classList.remove('has-mini');

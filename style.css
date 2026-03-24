@@ -563,17 +563,16 @@ body {
 .control-btn:hover { color: var(--spotify-green); transform: scale(1.1); }
 
 .floating-window.is-mini {
-    position: relative;
-    top: auto;
-    left: auto;
-    right: auto;
+    position: fixed;
+    top: var(--mini-top, 110px);
+    right: var(--mini-right, 90px);
+    left: var(--mini-left, auto);
     width: 360px;
     max-width: min(100%, 360px);
     height: 220px;
     transform: none;
-    z-index: 2;
+    z-index: 9050;
     box-shadow: 0 14px 35px rgba(0, 0, 0, 0.55);
-    margin-inline-start: auto;
     pointer-events: auto;
 }
 
