@@ -1643,7 +1643,12 @@ function togglePlaybackMode() {
     renderPlayerModeToggle();
     saveAppState();
 
-    if (currentPlayingId) updateMediaSessionMetadata({ id: currentPlayingId, t: document.getElementById('current-title')?.textContent, c: document.getElementById('current-channel')?.textContent });
+    if (currentPlayingId) {
+        upNextRecommendations = [];
+        renderUpNextList();
+        fetchUpNextRecommendations();
+        updateMediaSessionMetadata({ id: currentPlayingId, t: document.getElementById('current-title')?.textContent, c: document.getElementById('current-channel')?.textContent });
+    }
 }
 
 window.applyChannelFilter = applyChannelFilter;
