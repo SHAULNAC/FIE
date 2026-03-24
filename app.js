@@ -30,19 +30,24 @@ let playbackEngagementTimer = null;
 let playbackSessionToken = 0;
 let lastPlayedEncodedData = null;
 let upNextRecommendations = [];
+let isLoadingMoreRecommendations = false;
 let isMiniPlayerMode = false;
 let youtubePlayerBootstrapped = false;
 const sessionLikedVideoIds = new Set();
 
 const APP_STATE_STORAGE_KEY = 'fie:last-app-state';
+const LAST_PLAYED_TIME_STORAGE_KEY = 'lastPlayedTime';
+const LAST_PLAYED_TIME_VIDEO_ID_STORAGE_KEY = 'lastPlayedTimeVideoId';
+const RECOVERY_TOAST_TIMEOUT_MS = 10000;
+
+let playbackTrackingInterval = null;
+let pendingSeekTime = null;
+let recoveryToastTimeout = null;
 
 function saveAppState() {
     try {
-        const searchInput = document.getElementById('globalSearch');
         const state = {
             appMode: currentAppMode,
-            searchQuery: searchInput ? searchInput.value : currentSearchQuery,
-            channelFilter: currentChannelFilter,
             playbackMode,
             lastPlayedEncodedData,
             currentPlayingId
@@ -62,6 +67,83 @@ function loadSavedAppState() {
         console.warn('לא ניתן לקרוא מצב שמור:', err);
         return null;
     }
+}
+
+function saveLastPlaybackTime() {
+    if (!ytPlayer || typeof ytPlayer.getCurrentTime !== 'function' || !currentPlayingId) return;
+    const currentTime = Math.floor(ytPlayer.getCurrentTime() || 0);
+    localStorage.setItem(LAST_PLAYED_TIME_STORAGE_KEY, String(currentTime));
+    localStorage.setItem(LAST_PLAYED_TIME_VIDEO_ID_STORAGE_KEY, currentPlayingId);
+}
+
+function startPlaybackTracking() {
+    if (playbackTrackingInterval) return;
+    playbackTrackingInterval = setInterval(() => {
+        if (isPlaying) saveLastPlaybackTime();
+    }, 5000);
+}
+
+function stopPlaybackTracking() {
+    if (!playbackTrackingInterval) return;
+    clearInterval(playbackTrackingInterval);
+    playbackTrackingInterval = null;
+}
+
+function clearSavedPlaybackData(clearAppState = true) {
+    localStorage.removeItem(LAST_PLAYED_TIME_STORAGE_KEY);
+    localStorage.removeItem(LAST_PLAYED_TIME_VIDEO_ID_STORAGE_KEY);
+    pendingSeekTime = null;
+
+    if (clearAppState) {
+        lastPlayedEncodedData = null;
+        currentPlayingId = null;
+        saveAppState();
+    }
+}
+
+function showRecoveryToast(encodedData, savedTimestamp) {
+    const content = document.querySelector('.content');
+    if (!content) return;
+
+    const existing = document.getElementById('recovery-toast');
+    if (existing) existing.remove();
+    if (recoveryToastTimeout) clearTimeout(recoveryToastTimeout);
+
+    const toast = document.createElement('div');
+    toast.id = 'recovery-toast';
+    toast.className = 'recovery-toast';
+    toast.innerHTML = `
+        <div class="recovery-toast-text">להמשיך בצפייה מאיפה שהפסקת?</div>
+        <div class="recovery-toast-actions">
+            <button class="recovery-btn recovery-btn-continue" id="recovery-continue-btn">המשך</button>
+            <button class="recovery-btn recovery-btn-cancel" id="recovery-cancel-btn">ביטול / התחל מחדש</button>
+        </div>
+        <div class="recovery-progress"><div class="recovery-progress-bar"></div></div>
+    `;
+    content.appendChild(toast);
+
+    const closeToast = ({ clearSaved = false } = {}) => {
+        if (recoveryToastTimeout) {
+            clearTimeout(recoveryToastTimeout);
+            recoveryToastTimeout = null;
+        }
+        toast.remove();
+        if (clearSaved) clearSavedPlaybackData(true);
+    };
+
+    toast.querySelector('#recovery-continue-btn')?.addEventListener('click', () => {
+        pendingSeekTime = Math.max(0, Number(savedTimestamp) || 0);
+        closeToast();
+        preparePlay(encodedData);
+    });
+
+    toast.querySelector('#recovery-cancel-btn')?.addEventListener('click', () => {
+        closeToast({ clearSaved: true });
+    });
+
+    recoveryToastTimeout = setTimeout(() => {
+        closeToast({ clearSaved: true });
+    }, RECOVERY_TOAST_TIMEOUT_MS);
 }
 
 const categoryMap = {
@@ -286,14 +368,7 @@ async function init() {
             playbackMode = savedState.playbackMode || (savedState.isSearchPlaybackPinned ? 'playlist' : 'smart');
         }
 
-        if (savedState?.searchQuery) {
-            const searchInput = document.getElementById('globalSearch');
-            if (searchInput) searchInput.value = savedState.searchQuery;
-            currentChannelFilter = savedState.channelFilter || null;
-            fetchVideos(savedState.searchQuery, false, { preserveChannelFilter: Boolean(savedState.channelFilter) });
-        } else {
-            fetchVideos();
-        }
+        fetchVideos();
 
         if (savedState?.appMode === 'history' && currentUser) {
             displayHistory();
@@ -302,11 +377,21 @@ async function init() {
         }
 
         if (savedState?.lastPlayedEncodedData) {
-            preparePlay(savedState.lastPlayedEncodedData);
+            const savedTime = Number(localStorage.getItem(LAST_PLAYED_TIME_STORAGE_KEY) || 0);
+            const savedTimeVideoId = localStorage.getItem(LAST_PLAYED_TIME_VIDEO_ID_STORAGE_KEY);
+            const shouldOfferResume = savedTime > 0 && savedTimeVideoId && savedTimeVideoId === savedState.currentPlayingId;
+
+            if (shouldOfferResume) {
+                showRecoveryToast(savedState.lastPlayedEncodedData, savedTime);
+            } else {
+                clearSavedPlaybackData(true);
+            }
         }
 
         initPlayerInteractions();
         renderSearchControls();
+        startPlaybackTracking();
+        window.addEventListener('beforeunload', saveLastPlaybackTime);
 
     } catch (error) {
         console.error("Error during init:", error);
@@ -866,6 +951,33 @@ function renderUpNextList() {
     }).join('');
 }
 
+function buildUpNextItemHtml(video) {
+    const safeTitle = escapeHtml(video.title || 'ללא כותרת');
+    const safeChannel = escapeHtml(video.channel_title || '');
+    const safeThumb = escapeHtml(video.thumbnail || '');
+    const activeClass = video.id === currentPlayingId ? 'active' : '';
+    const videoData = {
+        id: video.id,
+        t: video.title,
+        c: video.channel_title,
+        cat: categoryMap[video.category_id] || "כללי",
+        v: getVideoViews(video),
+        l: getVideoLikes(video),
+        duration: video.duration
+    };
+    const encodedData = btoa(encodeURIComponent(JSON.stringify(videoData)));
+
+    return `
+        <div class="up-next-item ${activeClass}" onclick="preparePlay('${encodedData}')">
+            <div class="up-next-thumb"><img src="${safeThumb}" alt="${safeTitle}" loading="lazy"></div>
+            <div class="up-next-info">
+                <strong>${safeTitle}</strong>
+                <p>${safeChannel}</p>
+            </div>
+        </div>
+    `;
+}
+
 async function fetchUpNextRecommendations() {
     if (!currentPlayingId) return;
 
@@ -904,6 +1016,52 @@ async function fetchUpNextRecommendations() {
     }
 
     renderUpNextList();
+}
+
+async function loadMoreRecommendations() {
+    if (!currentPlayingId || isLoadingMoreRecommendations) return;
+    const list = document.getElementById('up-next-list');
+    if (!list) return;
+
+    isLoadingMoreRecommendations = true;
+    const existingIds = new Set(upNextRecommendations.map((v) => v.id));
+    let newItems = [];
+
+    try {
+        if (playbackMode === 'playlist' || !currentUser) {
+            newItems = displayResults
+                .filter((v) => v.id !== currentPlayingId && !existingIds.has(v.id))
+                .slice(0, 12);
+        } else {
+            const { data: currentVid } = await client
+                .from('videos')
+                .select('category_id, tags, channel_title')
+                .eq('id', currentPlayingId)
+                .single();
+            if (!currentVid) throw new Error('No current video metadata');
+
+            const tagsString = Array.isArray(currentVid.tags) ? currentVid.tags.join(' ') : String(currentVid.tags || '');
+            const { data: recommendations, error } = await client.rpc('get_smart_recommendations', {
+                p_user_id: currentUser.id,
+                p_current_video_id: currentPlayingId,
+                p_category_id: currentVid.category_id,
+                p_current_tags: tagsString,
+                p_channel_title: currentVid.channel_title,
+                p_limit: upNextRecommendations.length + 12
+            });
+            if (error) throw error;
+            newItems = (recommendations || []).filter((v) => !existingIds.has(v.id)).slice(0, 12);
+        }
+    } catch (err) {
+        console.error('טעינת המלצות נוספות נכשלה:', err);
+    } finally {
+        isLoadingMoreRecommendations = false;
+    }
+
+    if (!newItems.length) return;
+    upNextRecommendations.push(...newItems);
+    const html = newItems.map(buildUpNextItemHtml).join('');
+    list.insertAdjacentHTML('beforeend', html);
 }
 
 function initPlayerInteractions() {
@@ -949,6 +1107,11 @@ function initPlayerInteractions() {
     if (upNextList) {
         upNextList.addEventListener('wheel', (event) => {
             event.stopPropagation();
+        }, { passive: true });
+
+        upNextList.addEventListener('scroll', () => {
+            const nearBottom = upNextList.scrollTop + upNextList.clientHeight >= upNextList.scrollHeight - 50;
+            if (nearBottom) loadMoreRecommendations();
         }, { passive: true });
     }
 }
@@ -1019,20 +1182,32 @@ async function preparePlay(encodedData) {
                 events: {
                     'onReady': (event) => {
                         event.target.playVideo();
+                        if (pendingSeekTime !== null && pendingSeekTime > 0) {
+                            event.target.seekTo(pendingSeekTime, true);
+                            pendingSeekTime = null;
+                        }
                     },
                     'onStateChange': async (event) => {
                         if (event.data === YT.PlayerState.PLAYING) {
                             isPlaying = true;
+                            if (pendingSeekTime !== null && pendingSeekTime > 0 && ytPlayer && typeof ytPlayer.seekTo === 'function') {
+                                ytPlayer.seekTo(pendingSeekTime, true);
+                                pendingSeekTime = null;
+                            }
                             updatePlayStatus(true);
                             if ('mediaSession' in navigator) navigator.mediaSession.playbackState = "playing";
                         } else if (event.data === YT.PlayerState.PAUSED) {
                             isPlaying = false;
+                            saveLastPlaybackTime();
                             updatePlayStatus(false);
                             if ('mediaSession' in navigator) navigator.mediaSession.playbackState = "paused";
                         } else if (event.data === YT.PlayerState.ENDED) {
-                            console.log("הסרטון הסתיים, מחפש המלצה חכמה...");
-                            const nextVid = await fetchSmartRecommendation();
-
+                            saveLastPlaybackTime();
+                            console.log("הסרטון הסתיים, מעביר אוטומטית לסרטון הבא בתור ההמלצות...");
+                            if (upNextRecommendations.length && upNextRecommendations[0].id === currentPlayingId) {
+                                upNextRecommendations.shift();
+                            }
+                            const nextVid = upNextRecommendations[0];
                             if (nextVid) {
                                 const videoData = {
                                     id: nextVid.id,
@@ -1074,7 +1249,11 @@ async function preparePlay(encodedData) {
                 if (extra && descElem) descElem.textContent = extra.description || "אין תיאור זמין";
             });
 
-        await fetchUpNextRecommendations();
+        if (!upNextRecommendations.length) {
+            await fetchUpNextRecommendations();
+        } else {
+            renderUpNextList();
+        }
 
         // --- הגדרת Media Session (שלט רחוק ומסך נעילה) ---
         if ('mediaSession' in navigator) {
@@ -1192,6 +1371,7 @@ async function playNextInQueue() {
 }
 
 function closePlayer() {
+    saveLastPlaybackTime();
     const playerWin = document.getElementById('floating-player');
     const body = document.body;
     const miniSlot = document.getElementById('mini-player-slot');
@@ -1491,3 +1671,7 @@ function triggerAnalytics(query) {
 
 renderSearchControls();
 init();
+
+window.addEventListener('unload', () => {
+    stopPlaybackTracking();
+});
