@@ -40,10 +40,12 @@ const APP_STATE_STORAGE_KEY = 'fie:last-app-state';
 const LAST_PLAYED_TIME_STORAGE_KEY = 'lastPlayedTime';
 const LAST_PLAYED_TIME_VIDEO_ID_STORAGE_KEY = 'lastPlayedTimeVideoId';
 const RECOVERY_TOAST_TIMEOUT_MS = 10000;
+const THEME_PREFERENCE_STORAGE_KEY = 'fie:theme-preference';
 
 let playbackTrackingInterval = null;
 let pendingSeekTime = null;
 let recoveryToastTimeout = null;
+let currentThemePreference = 'system';
 
 function saveAppState() {
     try {
@@ -68,6 +70,59 @@ function loadSavedAppState() {
         console.warn('לא ניתן לקרוא מצב שמור:', err);
         return null;
     }
+}
+
+function applyThemePreference(preference = 'system') {
+    currentThemePreference = preference;
+    localStorage.setItem(THEME_PREFERENCE_STORAGE_KEY, preference);
+
+    const body = document.body;
+    if (!body) return;
+
+    if (preference === 'system') {
+        const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+        body.setAttribute('data-theme', prefersDark ? 'dark' : 'light');
+    } else {
+        body.setAttribute('data-theme', preference);
+    }
+    updateThemeModalSelection();
+}
+
+function initThemePreference() {
+    const savedPreference = localStorage.getItem(THEME_PREFERENCE_STORAGE_KEY) || 'system';
+    applyThemePreference(savedPreference);
+
+    const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+    mediaQuery.addEventListener('change', () => {
+        if (currentThemePreference === 'system') applyThemePreference('system');
+    });
+}
+
+function updateThemeModalSelection() {
+    const options = document.querySelectorAll('.theme-option');
+    options.forEach((option) => {
+        option.classList.toggle('is-active', option.dataset.theme === currentThemePreference);
+    });
+}
+
+function openPreferencesModal() {
+    if (!currentUser) {
+        showCustomAlert('נדרש להתחבר', 'אפשרויות העדפה זמינות רק למשתמשים מחוברים.', 'התחבר עם גוגל', () => login());
+        return;
+    }
+    const modal = document.getElementById('preferences-modal');
+    if (!modal) return;
+    updateThemeModalSelection();
+    modal.style.display = 'flex';
+}
+
+function closePreferencesModal() {
+    const modal = document.getElementById('preferences-modal');
+    if (modal) modal.style.display = 'none';
+}
+
+function selectTheme(theme) {
+    applyThemePreference(theme);
 }
 
 function saveLastPlaybackTime() {
@@ -372,6 +427,7 @@ function playVideoFromObject(vid) {
 
 async function init() {
     try {
+        initThemePreference();
         const savedState = loadSavedAppState();
 
         const { data: { user } } = await client.auth.getUser();
@@ -1554,6 +1610,10 @@ async function loadSidebarLists() {
                 <i class="fa-solid fa-clock"></i>
                 <span class="nav-text">אחרונים שנוספו</span>
             </div>
+            <div class="nav-link" onclick='openPreferencesModal()' title="העדפות">
+                <i class="fa-solid fa-sliders"></i>
+                <span class="nav-text">העדפות</span>
+            </div>
         `;
     }
 }
@@ -1625,8 +1685,11 @@ function closePrivacy() {
 
 window.onclick = function(event) {
     const modal = document.getElementById('privacy-modal');
+    const preferencesModal = document.getElementById('preferences-modal');
     if (event.target == modal) {
         closePrivacy();
+    } else if (event.target == preferencesModal) {
+        closePreferencesModal();
     }
 }
 
@@ -1718,6 +1781,9 @@ window.applyChannelFilter = applyChannelFilter;
 window.applyChannelFilterByName = applyChannelFilterByName;
 window.togglePlaybackMode = togglePlaybackMode;
 window.toggleCurrentPlayingFavorite = toggleCurrentPlayingFavorite;
+window.openPreferencesModal = openPreferencesModal;
+window.closePreferencesModal = closePreferencesModal;
+window.selectTheme = selectTheme;
 
 window.playNextVideo = async function() {
     console.log("מדלג לסרטון הבא (מתעדף המלצה חכמה)...");

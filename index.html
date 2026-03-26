@@ -170,6 +170,26 @@
         </div>
     </div>
 
+    <div id="preferences-modal" class="modal-overlay">
+        <div class="modal-content preferences-modal-content">
+            <div class="modal-header">
+                <h2>העדפות תצוגה</h2>
+                <button onclick="closePreferencesModal()" class="close-modal-btn">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p style="margin-top:0;">בחר מצב תצוגה:</p>
+                <div class="theme-options">
+                    <button class="theme-option" data-theme="light" onclick="selectTheme('light')">בהיר</button>
+                    <button class="theme-option" data-theme="dark" onclick="selectTheme('dark')">כהה</button>
+                    <button class="theme-option" data-theme="system" onclick="selectTheme('system')">מערכת (ברירת מחדל)</button>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button onclick="closePreferencesModal()" class="modal-confirm-btn">סגור</button>
+            </div>
+        </div>
+    </div>
+
     <script src="app.js"></script>
     <script src="https://www.youtube.com/iframe_api"></script>
 </body>
