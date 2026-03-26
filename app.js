@@ -116,6 +116,33 @@ function openPreferencesModal() {
     modal.style.display = 'flex';
 }
 
+function showLoginRequiredPrompt(featureLabel) {
+    showCustomAlert(
+        'נדרשת התחברות',
+        `כדי לפתוח את "${featureLabel}" צריך להתחבר עם Google.`,
+        'התחבר עם גוגל',
+        () => login()
+    );
+}
+
+function handleSidebarAuthAction(target) {
+    if (!currentUser) {
+        const labels = {
+            history: 'היסטוריית צפייה',
+            favorites: 'סרטונים שאהבתי',
+            recent: 'אחרונים שנוספו',
+            preferences: 'העדפות'
+        };
+        showLoginRequiredPrompt(labels[target] || 'אפשרות זו');
+        return;
+    }
+
+    if (target === 'history') displayHistory();
+    else if (target === 'favorites') displayFavorites();
+    else if (target === 'recent') displayRecentlyAdded();
+    else if (target === 'preferences') openPreferencesModal();
+}
+
 function closePreferencesModal() {
     const modal = document.getElementById('preferences-modal');
     if (modal) modal.style.display = 'none';
@@ -436,7 +463,7 @@ async function init() {
         client.auth.onAuthStateChange((event, session) => {
             currentUser = session?.user || null;
             updateUserUI();
-            if (currentUser) loadSidebarLists();
+            loadSidebarLists();
             refreshRecentWatchedVideos();
             if (!currentUser && playbackMode === 'smart') {
                 playbackMode = 'playlist';
@@ -447,13 +474,13 @@ async function init() {
         });
 
         updateUserUI();
+        loadSidebarLists();
         
         if (currentUser) {
             const { data: favs } = await client.from('favorites')
                 .select('video_id')
                 .eq('user_id', currentUser.id);
             userFavorites = favs ? favs.map(f => f.video_id) : [];
-            loadSidebarLists();
             updatePlayerBarFavoriteButton();
             refreshRecentWatchedVideos();
         }
@@ -1594,23 +1621,23 @@ async function submitEfficiency(videoId, score, btn) {
 }
 
 async function loadSidebarLists() {
-    if (!currentUser) return;
     const sidebarList = document.getElementById('favorites-list');
     if (sidebarList) {
+        const disabledClass = !currentUser ? 'is-disabled' : '';
         sidebarList.innerHTML = `
-            <div class="nav-link" onclick='displayHistory()' title="היסטוריית צפייה">
+            <div class="nav-link ${disabledClass}" onclick="handleSidebarAuthAction('history')" title="היסטוריית צפייה">
                 <i class="fa-solid fa-clock-rotate-left"></i>
                 <span class="nav-text">היסטוריית צפייה</span>
             </div>
-            <div class="nav-link" onclick='displayFavorites()' title="סרטונים שאהבתי">
+            <div class="nav-link ${disabledClass}" onclick="handleSidebarAuthAction('favorites')" title="סרטונים שאהבתי">
                 <i class="fa-solid fa-heart"></i>
                 <span class="nav-text">סרטונים שאהבתי</span>
             </div>
-            <div class="nav-link" onclick='displayRecentlyAdded()' title="אחרונים שנוספו למאגר">
+            <div class="nav-link ${disabledClass}" onclick="handleSidebarAuthAction('recent')" title="אחרונים שנוספו למאגר">
                 <i class="fa-solid fa-clock"></i>
                 <span class="nav-text">אחרונים שנוספו</span>
             </div>
-            <div class="nav-link" onclick='openPreferencesModal()' title="העדפות">
+            <div class="nav-link ${disabledClass}" onclick="handleSidebarAuthAction('preferences')" title="העדפות">
                 <i class="fa-solid fa-sliders"></i>
                 <span class="nav-text">העדפות</span>
             </div>
@@ -1784,6 +1811,7 @@ window.toggleCurrentPlayingFavorite = toggleCurrentPlayingFavorite;
 window.openPreferencesModal = openPreferencesModal;
 window.closePreferencesModal = closePreferencesModal;
 window.selectTheme = selectTheme;
+window.handleSidebarAuthAction = handleSidebarAuthAction;
 
 window.playNextVideo = async function() {
     console.log("מדלג לסרטון הבא (מתעדף המלצה חכמה)...");
