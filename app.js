@@ -984,8 +984,9 @@ function renderVideoGrid(videos, isAppend = false) {
         const favIconClass = isFav ? 'fa-solid' : 'fa-regular';
         const displayDuration = v.duration ? formatDuration(v.duration) : '';
 
+        const favoriteClass = isFav ? 'is-favorite' : '';
         return `
-            <div class="v-card" onclick="preparePlay('${encodedData}')">
+            <div class="v-card ${favoriteClass}" onclick="preparePlay('${encodedData}')">
                 <div class="v-thumb">
                     <img src="${v.thumbnail}" alt="${safeTitle}" loading="lazy">
                     <span class="v-duration">${displayDuration}</span>
@@ -1032,6 +1033,13 @@ function setPlayerMode(miniMode) {
         player.style.removeProperty('--mini-top');
         player.style.removeProperty('--mini-right');
     }
+}
+
+function scrollToSearch() {
+    const searchInput = document.getElementById('globalSearch');
+    if (!searchInput) return;
+    searchInput.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    setTimeout(() => searchInput.focus(), 280);
 }
 
 function updateMiniPlayerPosition() {
@@ -1812,6 +1820,7 @@ window.openPreferencesModal = openPreferencesModal;
 window.closePreferencesModal = closePreferencesModal;
 window.selectTheme = selectTheme;
 window.handleSidebarAuthAction = handleSidebarAuthAction;
+window.scrollToSearch = scrollToSearch;
 
 window.playNextVideo = async function() {
     console.log("מדלג לסרטון הבא (מתעדף המלצה חכמה)...");

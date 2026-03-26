@@ -444,6 +444,11 @@ body {
     border-color: #333;
 }
 
+.v-card.is-favorite {
+    border-color: rgba(24, 124, 134, 0.75);
+    background: linear-gradient(180deg, rgba(24, 124, 134, 0.14), var(--light-grey));
+}
+
 .v-thumb { 
     position: relative; width: 100%; aspect-ratio: 16/9; 
     border-radius: 8px; overflow: hidden; background: #000;
@@ -471,6 +476,25 @@ body {
 .fav-btn { background: none; border: none; color: var(--text-dim); cursor: pointer; font-size: 16px; transition: 0.2s; }
 .fav-btn:hover { transform: scale(1.2); }
 .fa-solid.fa-heart { color: var(--spotify-green) !important; }
+
+body[data-theme="light"] .v-card.is-favorite {
+    background: linear-gradient(180deg, rgba(24, 124, 134, 0.18), #ffffff);
+    border-color: #6aa9b2;
+    box-shadow: 0 8px 20px rgba(24, 124, 134, 0.18) !important;
+}
+
+body[data-theme="light"] .player-controls .control-btn,
+body[data-theme="light"] .floating-top-actions .control-btn,
+body[data-theme="light"] .video-meta-sub,
+body[data-theme="light"] #current-title,
+body[data-theme="light"] #current-channel,
+body[data-theme="light"] #current-category {
+    color: #1f4d55;
+}
+
+body[data-theme="light"] .control-btn:hover {
+    color: #0f7b86;
+}
 
 /* --- Floating Player Experience --- */
 .player-overlay {
