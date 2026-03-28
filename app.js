@@ -1126,6 +1126,9 @@ function handleUpNextDragOver(event) {
     const list = target.parentElement;
     if (!list) return;
 
+    const items = Array.from(list.querySelectorAll('.up-next-item'));
+    const beforeRects = new Map(items.map((item) => [item.dataset.videoId, item.getBoundingClientRect()]));
+
     const rect = target.getBoundingClientRect();
     const shouldInsertAfter = event.clientY > rect.top + rect.height / 2;
 
@@ -1138,6 +1141,8 @@ function handleUpNextDragOver(event) {
             list.insertBefore(draggedUpNextElement, target);
         }
     }
+
+    animateUpNextReflow(list, beforeRects);
 }
 
 function handleUpNextDrop(event) {
@@ -1166,6 +1171,26 @@ function syncUpNextOrderFromDom() {
         upNextRecommendations = reordered;
         renderUpNextList();
     }
+}
+
+function animateUpNextReflow(list, beforeRects) {
+    const items = Array.from(list.querySelectorAll('.up-next-item'));
+    items.forEach((item) => {
+        if (item === draggedUpNextElement) return;
+        const before = beforeRects.get(item.dataset.videoId);
+        if (!before) return;
+        const after = item.getBoundingClientRect();
+        const deltaY = before.top - after.top;
+        if (!deltaY) return;
+
+        item.style.transition = 'none';
+        item.style.transform = `translateY(${deltaY}px)`;
+
+        requestAnimationFrame(() => {
+            item.style.transition = 'transform 180ms ease';
+            item.style.transform = '';
+        });
+    });
 }
 
 function removeUpNextVideo(videoId, event) {

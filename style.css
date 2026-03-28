@@ -679,7 +679,8 @@ body[data-theme="light"] .control-btn:hover {
     background: #1b1b1b;
     padding: 8px;
     cursor: pointer;
-    transition: background 0.2s, border-color 0.2s;
+    transition: background 0.2s, border-color 0.2s, transform 0.18s ease;
+    will-change: transform;
 }
 
 .up-next-remove-btn {
