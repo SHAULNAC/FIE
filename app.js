@@ -46,7 +46,7 @@ let playbackTrackingInterval = null;
 let pendingSeekTime = null;
 let recoveryToastTimeout = null;
 let currentThemePreference = 'system';
-let draggedUpNextIndex = null;
+let draggedUpNextElement = null;
 
 function saveAppState() {
     try {
@@ -1091,6 +1091,7 @@ function buildUpNextItemHtml(video, index) {
         <div class="up-next-item ${activeClass}" 
             draggable="true"
             data-index="${index}"
+            data-video-id="${video.id}"
             ondragstart="handleUpNextDragStart(event)"
             ondragover="handleUpNextDragOver(event)"
             ondrop="handleUpNextDrop(event)"
@@ -1109,33 +1110,62 @@ function buildUpNextItemHtml(video, index) {
 }
 
 function handleUpNextDragStart(event) {
-    const index = Number(event.currentTarget?.dataset?.index);
-    if (Number.isNaN(index)) return;
-    draggedUpNextIndex = index;
+    draggedUpNextElement = event.currentTarget;
+    if (!draggedUpNextElement) return;
     event.dataTransfer.effectAllowed = 'move';
-    event.currentTarget.classList.add('is-dragging');
+    draggedUpNextElement.classList.add('is-dragging');
 }
 
 function handleUpNextDragOver(event) {
     event.preventDefault();
     event.dataTransfer.dropEffect = 'move';
+
+    const target = event.currentTarget;
+    if (!draggedUpNextElement || !target || draggedUpNextElement === target) return;
+
+    const list = target.parentElement;
+    if (!list) return;
+
+    const rect = target.getBoundingClientRect();
+    const shouldInsertAfter = event.clientY > rect.top + rect.height / 2;
+
+    if (shouldInsertAfter) {
+        if (target.nextSibling !== draggedUpNextElement) {
+            list.insertBefore(draggedUpNextElement, target.nextSibling);
+        }
+    } else {
+        if (target.previousSibling !== draggedUpNextElement) {
+            list.insertBefore(draggedUpNextElement, target);
+        }
+    }
 }
 
 function handleUpNextDrop(event) {
     event.preventDefault();
-    const dropIndex = Number(event.currentTarget?.dataset?.index);
-    if (Number.isNaN(dropIndex) || draggedUpNextIndex === null || dropIndex === draggedUpNextIndex) return;
-
-    const [moved] = upNextRecommendations.splice(draggedUpNextIndex, 1);
-    if (!moved) return;
-    upNextRecommendations.splice(dropIndex, 0, moved);
-    draggedUpNextIndex = null;
-    renderUpNextList();
+    syncUpNextOrderFromDom();
 }
 
 function handleUpNextDragEnd(event) {
-    draggedUpNextIndex = null;
+    syncUpNextOrderFromDom();
+    draggedUpNextElement = null;
     event.currentTarget.classList.remove('is-dragging');
+}
+
+function syncUpNextOrderFromDom() {
+    const list = document.getElementById('up-next-list');
+    if (!list) return;
+    const orderIds = Array.from(list.querySelectorAll('.up-next-item')).map((item) => item.dataset.videoId);
+    if (!orderIds.length) return;
+
+    const byId = new Map(upNextRecommendations.map((video) => [video.id, video]));
+    const reordered = orderIds
+        .map((id) => byId.get(id))
+        .filter(Boolean);
+
+    if (reordered.length === upNextRecommendations.length) {
+        upNextRecommendations = reordered;
+        renderUpNextList();
+    }
 }
 
 function removeUpNextVideo(videoId, event) {
