@@ -98,6 +98,87 @@ body[data-theme="light"] .theme-option {
     box-shadow: none;
 }
 
+/* --- Light Theme Redesign: keep dark-mode language with lighter surfaces --- */
+body[data-theme="light"] {
+    color-scheme: light;
+}
+
+body[data-theme="light"] .brand-title-main,
+body[data-theme="light"] h1,
+body[data-theme="light"] h2,
+body[data-theme="light"] h3 {
+    color: #123940;
+}
+
+body[data-theme="light"] .sidebar,
+body[data-theme="light"] .sidebar-wrapper {
+    background: linear-gradient(180deg, #eaf5f7, #dcecef);
+}
+
+body[data-theme="light"] .content {
+    background: linear-gradient(180deg, #eef7f8 0%, #e5f0f2 100%);
+}
+
+body[data-theme="light"] .search-bar {
+    border: 1px solid #b9d6db;
+    background: rgba(255, 255, 255, 0.95);
+}
+
+body[data-theme="light"] .search-bar:focus-within {
+    border-color: #187c86;
+    box-shadow: 0 0 0 3px rgba(24, 124, 134, 0.16);
+}
+
+body[data-theme="light"] .v-card,
+body[data-theme="light"] .up-next-item,
+body[data-theme="light"] .modal-content,
+body[data-theme="light"] .up-next-panel,
+body[data-theme="light"] .floating-meta-controls {
+    background: #fdfefe;
+    border-color: #c8dde1;
+}
+
+body[data-theme="light"] .v-info p,
+body[data-theme="light"] .card-footer,
+body[data-theme="light"] .up-next-info p,
+body[data-theme="light"] .video-meta-sub,
+body[data-theme="light"] .bottom-desc {
+    color: #4d7077;
+}
+
+body[data-theme="light"] .floating-window {
+    background: linear-gradient(180deg, #f9fcfd, #edf6f8);
+    border-color: #bbd4d9;
+}
+
+body[data-theme="light"] #youtubePlayer {
+    border: 1px solid #bfd8dd;
+}
+
+body[data-theme="light"] .up-next-item:hover,
+body[data-theme="light"] .up-next-item.active {
+    background: #eaf4f6;
+    border-color: #6aa9b2;
+}
+
+body[data-theme="light"] .fav-btn,
+body[data-theme="light"] .up-next-remove-btn {
+    color: #3a636a;
+}
+
+body[data-theme="light"] .fav-btn:hover,
+body[data-theme="light"] .up-next-remove-btn:hover {
+    color: #0f6f79;
+}
+
+body[data-theme="light"] .modal-header {
+    border-bottom-color: #c5dce1;
+}
+
+body[data-theme="light"] .modal-footer .modal-confirm-btn {
+    color: #06262b;
+}
+
 *, body, button, input, select, textarea {
     font-family: 'Rubik', sans-serif;
     box-sizing: border-box;
@@ -628,6 +709,11 @@ body[data-theme="light"] .control-btn:hover {
 .up-next-item.active {
     background: #222f31;
     border-color: var(--spotify-green);
+}
+
+.up-next-item.is-dragging {
+    opacity: 0.45;
+    border-style: dashed;
 }
 
 .up-next-thumb {

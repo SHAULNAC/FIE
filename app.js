@@ -46,6 +46,7 @@ let playbackTrackingInterval = null;
 let pendingSeekTime = null;
 let recoveryToastTimeout = null;
 let currentThemePreference = 'system';
+let draggedUpNextIndex = null;
 
 function saveAppState() {
     try {
@@ -986,7 +987,7 @@ function renderVideoGrid(videos, isAppend = false) {
 
         const favoriteClass = isFav ? 'is-favorite' : '';
         return `
-            <div class="v-card ${favoriteClass}" onclick="preparePlay('${encodedData}')">
+            <div class="v-card ${favoriteClass}" onclick="preparePlay('${encodedData}', { source: 'grid' })">
                 <div class="v-thumb">
                     <img src="${v.thumbnail}" alt="${safeTitle}" loading="lazy">
                     <span class="v-duration">${displayDuration}</span>
@@ -1067,10 +1068,10 @@ function renderUpNextList() {
         return;
     }
 
-    list.innerHTML = upNextRecommendations.map(buildUpNextItemHtml).join('');
+    list.innerHTML = upNextRecommendations.map((video, index) => buildUpNextItemHtml(video, index)).join('');
 }
 
-function buildUpNextItemHtml(video) {
+function buildUpNextItemHtml(video, index) {
     const safeTitle = escapeHtml(video.title || 'ללא כותרת');
     const safeChannel = escapeHtml(video.channel_title || '');
     const safeThumb = escapeHtml(video.thumbnail || '');
@@ -1087,7 +1088,14 @@ function buildUpNextItemHtml(video) {
     const encodedData = btoa(encodeURIComponent(JSON.stringify(videoData)));
 
     return `
-        <div class="up-next-item ${activeClass}" onclick="preparePlay('${encodedData}')">
+        <div class="up-next-item ${activeClass}" 
+            draggable="true"
+            data-index="${index}"
+            ondragstart="handleUpNextDragStart(event)"
+            ondragover="handleUpNextDragOver(event)"
+            ondrop="handleUpNextDrop(event)"
+            ondragend="handleUpNextDragEnd(event)"
+            onclick="preparePlay('${encodedData}')">
             <div class="up-next-thumb"><img src="${safeThumb}" alt="${safeTitle}" loading="lazy"></div>
             <div class="up-next-info">
                 <strong>${safeTitle}</strong>
@@ -1098,6 +1106,36 @@ function buildUpNextItemHtml(video) {
             </button>
         </div>
     `;
+}
+
+function handleUpNextDragStart(event) {
+    const index = Number(event.currentTarget?.dataset?.index);
+    if (Number.isNaN(index)) return;
+    draggedUpNextIndex = index;
+    event.dataTransfer.effectAllowed = 'move';
+    event.currentTarget.classList.add('is-dragging');
+}
+
+function handleUpNextDragOver(event) {
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'move';
+}
+
+function handleUpNextDrop(event) {
+    event.preventDefault();
+    const dropIndex = Number(event.currentTarget?.dataset?.index);
+    if (Number.isNaN(dropIndex) || draggedUpNextIndex === null || dropIndex === draggedUpNextIndex) return;
+
+    const [moved] = upNextRecommendations.splice(draggedUpNextIndex, 1);
+    if (!moved) return;
+    upNextRecommendations.splice(dropIndex, 0, moved);
+    draggedUpNextIndex = null;
+    renderUpNextList();
+}
+
+function handleUpNextDragEnd(event) {
+    draggedUpNextIndex = null;
+    event.currentTarget.classList.remove('is-dragging');
 }
 
 function removeUpNextVideo(videoId, event) {
@@ -1209,7 +1247,8 @@ async function loadMoreRecommendations() {
 
     if (!newItems.length) return;
     upNextRecommendations.push(...newItems);
-    const html = newItems.map(buildUpNextItemHtml).join('');
+    const startIndex = upNextRecommendations.length - newItems.length;
+    const html = newItems.map((video, idx) => buildUpNextItemHtml(video, startIndex + idx)).join('');
     list.insertAdjacentHTML('beforeend', html);
 }
 
@@ -1404,8 +1443,9 @@ async function preparePlay(encodedData, options = {}) {
                 if (extra && descElem) descElem.textContent = extra.description || "אין תיאור זמין";
             });
 
+        const wasGridTriggered = options.source === 'grid';
         const existsInUpNextQueue = upNextRecommendations.some((video) => video.id === data.id);
-        if (!upNextRecommendations.length || !existsInUpNextQueue) {
+        if (wasGridTriggered || !upNextRecommendations.length || !existsInUpNextQueue) {
             upNextRecommendations = [];
             renderUpNextList();
             await fetchUpNextRecommendations();
@@ -1821,6 +1861,10 @@ window.closePreferencesModal = closePreferencesModal;
 window.selectTheme = selectTheme;
 window.handleSidebarAuthAction = handleSidebarAuthAction;
 window.scrollToSearch = scrollToSearch;
+window.handleUpNextDragStart = handleUpNextDragStart;
+window.handleUpNextDragOver = handleUpNextDragOver;
+window.handleUpNextDrop = handleUpNextDrop;
+window.handleUpNextDragEnd = handleUpNextDragEnd;
 
 window.playNextVideo = async function() {
     console.log("מדלג לסרטון הבא (מתעדף המלצה חכמה)...");
