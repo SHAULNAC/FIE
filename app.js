@@ -1225,11 +1225,12 @@ async function fetchUpNextRecommendations() {
         });
 
         if (error) throw error;
-        upNextRecommendations = (recommendations || []).slice(0, 12);
-        if (!upNextRecommendations.length) upNextRecommendations = fallback;
+        upNextRecommendations = (recommendations || [])
+            .filter((video) => video.id !== currentPlayingId)
+            .slice(0, 12);
     } catch (err) {
         console.error('טעינת הצעות נכשלה:', err);
-        upNextRecommendations = fallback;
+        upNextRecommendations = [];
     }
 
     renderUpNextList();
