@@ -47,6 +47,7 @@ let pendingSeekTime = null;
 let recoveryToastTimeout = null;
 let currentThemePreference = 'system';
 let draggedUpNextElement = null;
+let playbackHistoryEncoded = [];
 
 function saveAppState() {
     try {
@@ -361,38 +362,56 @@ function startVoiceSearch() {
 
 // מעבר יזום לסרטון הבא בתור
 function playNextVideo() {
-    if (!currentPlayingId || activeQueue.length === 0) return;
-    const currentIndex = activeQueue.findIndex(v => v.id === currentPlayingId);
-    
-    if (currentIndex >= 0 && currentIndex < activeQueue.length - 1) {
-        const nextVid = activeQueue[currentIndex + 1];
+    if (!currentPlayingId) return;
+
+    const nextVid = upNextRecommendations.find((video) => video.id !== currentPlayingId);
+    if (nextVid) {
         playVideoFromObject(nextVid);
-    } else {
-        console.log("אין סרטון הבא בתור");
+        return;
     }
+
+    if (typeof window.playNextVideo === 'function' && window.playNextVideo !== playNextVideo) {
+        window.playNextVideo();
+        return;
+    }
+    console.log("אין סרטון הבא בתור");
 }
 
 // מעבר יזום לסרטון הקודם בתור
 function playPreviousVideo() {
-    if (!currentPlayingId || activeQueue.length === 0) return;
-    const currentIndex = activeQueue.findIndex(v => v.id === currentPlayingId);
-    
-    if (currentIndex > 0) {
-        const prevVid = activeQueue[currentIndex - 1];
-        playVideoFromObject(prevVid);
-    } else {
+    if (playbackHistoryEncoded.length < 2) {
         console.log("אין סרטון קודם בתור");
+        return;
     }
+
+    const currentEncoded = playbackHistoryEncoded[playbackHistoryEncoded.length - 1];
+    const previousEncoded = playbackHistoryEncoded[playbackHistoryEncoded.length - 2];
+    if (!previousEncoded) return;
+
+    try {
+        const currentDecoded = JSON.parse(decodeURIComponent(atob(currentEncoded)));
+        if (currentDecoded.id === currentPlayingId) {
+            playbackHistoryEncoded.pop();
+        }
+    } catch (_e) {
+        // no-op
+    }
+
+    preparePlay(previousEncoded, { source: 'history-nav' });
 }
 
 function getQueuePlaybackState() {
-    const queueLength = activeQueue.length;
-    const currentIndex = activeQueue.findIndex(v => v.id === currentPlayingId);
+    const queueIds = currentPlayingId ? [currentPlayingId] : [];
+    upNextRecommendations.forEach((video) => {
+        if (video.id !== currentPlayingId) queueIds.push(video.id);
+    });
+    const queueLength = queueIds.length;
+    const currentIndex = currentPlayingId ? 0 : -1;
     return {
         queueLength,
         currentIndex,
-        hasPrevious: currentIndex > 0,
-        hasNext: currentIndex >= 0 && currentIndex < queueLength - 1
+        hasPrevious: playbackHistoryEncoded.length > 1,
+        hasNext: queueLength > 1
     };
 }
 
@@ -1366,6 +1385,11 @@ async function preparePlay(encodedData, options = {}) {
     
     try {
         const data = JSON.parse(decodeURIComponent(atob(encodedData)));
+        if (options.source !== 'history-nav') {
+            if (!playbackHistoryEncoded.length || playbackHistoryEncoded[playbackHistoryEncoded.length - 1] !== encodedData) {
+                playbackHistoryEncoded.push(encodedData);
+            }
+        }
         lastPlayedEncodedData = encodedData;
         currentPlayingId = data.id; 
         playbackSessionToken += 1;
