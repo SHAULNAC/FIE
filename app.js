@@ -1019,9 +1019,14 @@ function renderVideoGrid(videos, isAppend = false) {
                     <p>${safeChannel}</p>
                     <div class="card-footer">
                         <span><i class="fa-solid fa-eye"></i> ${getVideoViews(v)}</span>
-                        <button class="fav-btn" onclick="event.stopPropagation(); toggleFavorite('${videoId}')">
-                            <i class="${favIconClass} fa-heart" id="fav-icon-${videoId}"></i>
-                        </button>
+                        <div class="card-actions">
+                            <button class="queue-btn" onclick="addVideoToUpNextFromGrid('${videoId}', event)" title="הוסף לבאים בתור">
+                                <i class="fa-solid fa-list-plus"></i>
+                            </button>
+                            <button class="fav-btn" onclick="event.stopPropagation(); toggleFavorite('${videoId}')">
+                                <i class="${favIconClass} fa-heart" id="fav-icon-${videoId}"></i>
+                            </button>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -1033,6 +1038,19 @@ function renderVideoGrid(videos, isAppend = false) {
     } else {
         grid.innerHTML = htmlString;
     }
+}
+
+function addVideoToUpNextFromGrid(videoId, event) {
+    if (event) {
+        event.preventDefault();
+        event.stopPropagation();
+    }
+    const video = displayResults.find((item) => item.id === videoId);
+    if (!video) return;
+    if (upNextRecommendations.some((item) => item.id === videoId)) return;
+
+    upNextRecommendations.push(video);
+    renderUpNextList();
 }
 
 // --- ניהול הנגן (עודכן ל-API רשמי) ---
@@ -1958,6 +1976,7 @@ window.handleUpNextDragStart = handleUpNextDragStart;
 window.handleUpNextDragOver = handleUpNextDragOver;
 window.handleUpNextDrop = handleUpNextDrop;
 window.handleUpNextDragEnd = handleUpNextDragEnd;
+window.addVideoToUpNextFromGrid = addVideoToUpNextFromGrid;
 
 window.playNextVideo = async function() {
     console.log("מדלג לסרטון הבא (מתעדף המלצה חכמה)...");

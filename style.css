@@ -554,8 +554,16 @@ body {
     align-items: center; font-size: 11px; color: var(--text-dim); 
 }
 
+.card-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.queue-btn,
 .fav-btn { background: none; border: none; color: var(--text-dim); cursor: pointer; font-size: 16px; transition: 0.2s; }
-.fav-btn:hover { transform: scale(1.2); }
+.queue-btn:hover,
+.fav-btn:hover { transform: scale(1.15); color: var(--spotify-green); }
 .fa-solid.fa-heart { color: var(--spotify-green) !important; }
 
 body[data-theme="light"] .v-card.is-favorite {
