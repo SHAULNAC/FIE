@@ -48,6 +48,7 @@ let recoveryToastTimeout = null;
 let currentThemePreference = 'system';
 let draggedUpNextElement = null;
 let playbackHistoryEncoded = [];
+let playbackHistoryCursor = -1;
 
 function saveAppState() {
     try {
@@ -379,28 +380,30 @@ function playNextVideo() {
 
 // מעבר יזום לסרטון הקודם בתור
 function playPreviousVideo() {
-    if (playbackHistoryEncoded.length < 2) {
+    if (playbackHistoryCursor <= 0 || playbackHistoryEncoded.length < 2) {
         console.log("אין סרטון קודם בתור");
         return;
     }
 
-    const currentEncoded = playbackHistoryEncoded[playbackHistoryEncoded.length - 1];
-    const previousEncoded = playbackHistoryEncoded[playbackHistoryEncoded.length - 2];
+    const targetCursor = playbackHistoryCursor - 1;
+    const previousEncoded = playbackHistoryEncoded[targetCursor];
     if (!previousEncoded) return;
-
-    try {
-        const currentDecoded = JSON.parse(decodeURIComponent(atob(currentEncoded)));
-        if (currentDecoded.id === currentPlayingId) {
-            playbackHistoryEncoded.pop();
-        }
-    } catch (_e) {
-        // no-op
-    }
-
-    preparePlay(previousEncoded, { source: 'history-nav' });
+    playbackHistoryCursor = targetCursor;
+    preparePlay(previousEncoded, { source: 'history-nav', historyCursor: targetCursor });
 }
 
 function getQueuePlaybackState() {
+    const playlistIndex = activeQueue.findIndex((video) => video.id === currentPlayingId);
+    if (playbackMode === 'playlist' && playlistIndex >= 0) {
+        const queueLength = activeQueue.length;
+        return {
+            queueLength,
+            currentIndex: playlistIndex,
+            hasPrevious: playbackHistoryCursor > 0 || playlistIndex > 0,
+            hasNext: playlistIndex < queueLength - 1
+        };
+    }
+
     const queueIds = currentPlayingId ? [currentPlayingId] : [];
     upNextRecommendations.forEach((video) => {
         if (video.id !== currentPlayingId) queueIds.push(video.id);
@@ -410,7 +413,7 @@ function getQueuePlaybackState() {
     return {
         queueLength,
         currentIndex,
-        hasPrevious: playbackHistoryEncoded.length > 1,
+        hasPrevious: playbackHistoryCursor > 0,
         hasNext: queueLength > 1
     };
 }
@@ -1385,10 +1388,20 @@ async function preparePlay(encodedData, options = {}) {
     
     try {
         const data = JSON.parse(decodeURIComponent(atob(encodedData)));
-        if (options.source !== 'history-nav') {
+        if (options.source === 'history-nav') {
+            if (typeof options.historyCursor === 'number') {
+                playbackHistoryCursor = options.historyCursor;
+            } else {
+                playbackHistoryCursor = playbackHistoryEncoded.lastIndexOf(encodedData);
+            }
+        } else {
+            if (playbackHistoryCursor < playbackHistoryEncoded.length - 1) {
+                playbackHistoryEncoded = playbackHistoryEncoded.slice(0, playbackHistoryCursor + 1);
+            }
             if (!playbackHistoryEncoded.length || playbackHistoryEncoded[playbackHistoryEncoded.length - 1] !== encodedData) {
                 playbackHistoryEncoded.push(encodedData);
             }
+            playbackHistoryCursor = playbackHistoryEncoded.length - 1;
         }
         lastPlayedEncodedData = encodedData;
         currentPlayingId = data.id; 
