@@ -41,7 +41,7 @@
                 <i class="fa-solid fa-house"></i>
                 <span class="nav-text">בית</span>
             </div>
-            <div class="nav-link" onclick="document.getElementById('globalSearch').focus()" title="חיפוש">
+            <div class="nav-link" onclick="scrollToSearch()" title="חיפוש">
                 <i class="fa-solid fa-magnifying-glass"></i>
                 <span class="nav-text">חיפוש</span>
             </div>
@@ -121,6 +121,7 @@
             </div>
 
             <div class="player-controls">
+                <div id="player-mode-toggle-wrap" class="player-mode-toggle-wrap"></div>
                 <button class="control-btn" onclick="playNextVideo()" title="סרטון הבא">
                     <i class="fa-solid fa-forward-step"></i>
                 </button>
@@ -165,6 +166,26 @@
             <div class="modal-footer" style="background: transparent; display: flex; justify-content: center; gap: 15px;">
                 <button id="alert-action-btn" class="modal-confirm-btn"></button>
                 <button onclick="closeCustomAlert()" class="modal-confirm-btn" style="background: #444; color: white;">אולי אחר כך</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="preferences-modal" class="modal-overlay">
+        <div class="modal-content preferences-modal-content">
+            <div class="modal-header">
+                <h2>העדפות תצוגה</h2>
+                <button onclick="closePreferencesModal()" class="close-modal-btn">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p style="margin-top:0;">בחר מצב תצוגה:</p>
+                <div class="theme-options">
+                    <button class="theme-option" data-theme="light" onclick="selectTheme('light')">בהיר</button>
+                    <button class="theme-option" data-theme="dark" onclick="selectTheme('dark')">כהה</button>
+                    <button class="theme-option" data-theme="system" onclick="selectTheme('system')">מערכת (ברירת מחדל)</button>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button onclick="closePreferencesModal()" class="modal-confirm-btn">סגור</button>
             </div>
         </div>
     </div>
