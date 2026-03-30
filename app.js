@@ -1022,7 +1022,7 @@ function renderVideoGrid(videos, isAppend = false) {
                         <span><i class="fa-solid fa-eye"></i> ${getVideoViews(v)}</span>
                         <div class="card-actions">
                             <button class="queue-btn ${isQueued ? 'is-queued' : ''}" onclick="addVideoToUpNextFromGrid('${videoId}', event)" title="${isQueued ? 'נוסף לבאים בתור' : 'הוסף לבאים בתור'}">
-                                <i class="fa-solid fa-list-plus"></i>
+                                <i class="fa-solid fa-plus"></i>
                             </button>
                             <button class="fav-btn" onclick="event.stopPropagation(); toggleFavorite('${videoId}')">
                                 <i class="${favIconClass} fa-heart" id="fav-icon-${videoId}"></i>
@@ -1050,11 +1050,14 @@ function addVideoToUpNextFromGrid(videoId, event) {
     if (!video) return;
     const queueBtn = event?.currentTarget?.closest ? event.currentTarget.closest('.queue-btn') : null;
     if (upNextRecommendations.some((item) => item.id === videoId)) {
+        upNextRecommendations = upNextRecommendations.filter((item) => item.id !== videoId);
+        upNextRecommendations.unshift(video);
         if (queueBtn) queueBtn.classList.add('is-queued');
+        renderUpNextList();
         return;
     }
 
-    upNextRecommendations.push(video);
+    upNextRecommendations.unshift(video);
     if (queueBtn) queueBtn.classList.add('is-queued');
     renderUpNextList();
 }
