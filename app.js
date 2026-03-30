@@ -1004,6 +1004,7 @@ function renderVideoGrid(videos, isAppend = false) {
 
         const encodedData = btoa(encodeURIComponent(JSON.stringify(videoData)));
         const isFav = userFavorites.includes(videoId);
+        const isQueued = upNextRecommendations.some((item) => item.id === videoId);
         const favIconClass = isFav ? 'fa-solid' : 'fa-regular';
         const displayDuration = v.duration ? formatDuration(v.duration) : '';
 
@@ -1020,7 +1021,7 @@ function renderVideoGrid(videos, isAppend = false) {
                     <div class="card-footer">
                         <span><i class="fa-solid fa-eye"></i> ${getVideoViews(v)}</span>
                         <div class="card-actions">
-                            <button class="queue-btn" onclick="addVideoToUpNextFromGrid('${videoId}', event)" title="הוסף לבאים בתור">
+                            <button class="queue-btn ${isQueued ? 'is-queued' : ''}" onclick="addVideoToUpNextFromGrid('${videoId}', event)" title="${isQueued ? 'נוסף לבאים בתור' : 'הוסף לבאים בתור'}">
                                 <i class="fa-solid fa-list-plus"></i>
                             </button>
                             <button class="fav-btn" onclick="event.stopPropagation(); toggleFavorite('${videoId}')">
@@ -1047,9 +1048,14 @@ function addVideoToUpNextFromGrid(videoId, event) {
     }
     const video = displayResults.find((item) => item.id === videoId);
     if (!video) return;
-    if (upNextRecommendations.some((item) => item.id === videoId)) return;
+    const queueBtn = event?.currentTarget?.closest ? event.currentTarget.closest('.queue-btn') : null;
+    if (upNextRecommendations.some((item) => item.id === videoId)) {
+        if (queueBtn) queueBtn.classList.add('is-queued');
+        return;
+    }
 
     upNextRecommendations.push(video);
+    if (queueBtn) queueBtn.classList.add('is-queued');
     renderUpNextList();
 }
 
@@ -2008,9 +2014,7 @@ window.playNextVideo = async function() {
     playNextInQueue();
 };
 
-window.playPreviousVideo = function() {
-    playPreviousVideo();
-};
+window.playPreviousVideo = playPreviousVideo;
 // פונקציית עזר לטיפול באנליטיקס כדי למנוע כפילות קוד
 // עדכון בתוך triggerAnalytics:
 function triggerAnalytics(query) {

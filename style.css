@@ -566,6 +566,36 @@ body {
 .fav-btn:hover { transform: scale(1.15); color: var(--spotify-green); }
 .fa-solid.fa-heart { color: var(--spotify-green) !important; }
 
+.queue-btn {
+    border: 1px solid rgba(123, 157, 162, 0.55);
+    border-radius: 7px;
+    width: 28px;
+    height: 28px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(21, 32, 35, 0.6);
+}
+
+.queue-btn.is-queued {
+    color: #ffffff;
+    border-color: rgba(24, 124, 134, 0.85);
+    background: rgba(24, 124, 134, 0.38);
+    box-shadow: 0 0 0 2px rgba(24, 124, 134, 0.2);
+}
+
+body[data-theme="light"] .queue-btn {
+    background: rgba(233, 247, 249, 0.95);
+    border-color: #9dc2c8;
+    color: #2f5d64;
+}
+
+body[data-theme="light"] .queue-btn.is-queued {
+    color: #0b4f58;
+    border-color: #2f8f9a;
+    background: rgba(78, 175, 188, 0.35);
+}
+
 body[data-theme="light"] .v-card.is-favorite {
     background: linear-gradient(180deg, rgba(24, 124, 134, 0.18), #ffffff);
     border-color: #6aa9b2;
