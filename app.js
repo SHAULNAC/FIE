@@ -1111,6 +1111,7 @@ function updateMiniPlayerPosition() {
 function renderUpNextList() {
     const list = document.getElementById('up-next-list');
     if (!list) return;
+    dedupeUpNextRecommendations();
 
     if (!upNextRecommendations.length) {
         list.innerHTML = '<p style="color:#b3b3b3; font-size:13px; margin:0;">אין כרגע הצעות זמינות.</p>';
@@ -1118,6 +1119,15 @@ function renderUpNextList() {
     }
 
     list.innerHTML = upNextRecommendations.map((video, index) => buildUpNextItemHtml(video, index)).join('');
+}
+
+function dedupeUpNextRecommendations() {
+    const seen = new Set();
+    upNextRecommendations = upNextRecommendations.filter((video) => {
+        if (!video?.id || seen.has(video.id)) return false;
+        seen.add(video.id);
+        return true;
+    });
 }
 
 function buildUpNextItemHtml(video, index) {
@@ -1145,7 +1155,7 @@ function buildUpNextItemHtml(video, index) {
             ondragover="handleUpNextDragOver(event)"
             ondrop="handleUpNextDrop(event)"
             ondragend="handleUpNextDragEnd(event)"
-            onclick="preparePlay('${encodedData}')">
+            onclick="preparePlay('${encodedData}', { source: 'upnext' })">
             <div class="up-next-thumb"><img src="${safeThumb}" alt="${safeTitle}" loading="lazy"></div>
             <div class="up-next-info">
                 <strong>${safeTitle}</strong>
@@ -1302,6 +1312,7 @@ async function fetchUpNextRecommendations() {
         upNextRecommendations = (recommendations || [])
             .filter((video) => video.id !== currentPlayingId)
             .slice(0, 12);
+        dedupeUpNextRecommendations();
     } catch (err) {
         console.error('טעינת הצעות נכשלה:', err);
         upNextRecommendations = [];
@@ -1351,9 +1362,12 @@ async function loadMoreRecommendations() {
     }
 
     if (!newItems.length) return;
+    const prevIds = new Set(upNextRecommendations.map((v) => v.id));
     upNextRecommendations.push(...newItems);
-    const startIndex = upNextRecommendations.length - newItems.length;
-    const html = newItems.map((video, idx) => buildUpNextItemHtml(video, startIndex + idx)).join('');
+    dedupeUpNextRecommendations();
+    const appendedItems = upNextRecommendations.filter((video) => !prevIds.has(video.id));
+    const startIndex = upNextRecommendations.length - appendedItems.length;
+    const html = appendedItems.map((video, idx) => buildUpNextItemHtml(video, startIndex + idx)).join('');
     list.insertAdjacentHTML('beforeend', html);
 }
 
